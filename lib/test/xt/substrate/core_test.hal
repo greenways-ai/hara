@@ -1,0 +1,266 @@
+(ns xt.substrate.core-test
+  (:use code.test)
+  (:require [tahto.core :as l]))
+
+^{:seedgen/root {:all true, :langs [:js :lua :python]}}
+(l/script- :js
+  {:runtime :basic
+   :require [[xt.lang.spec-base :as xt]
+             [xt.event.base-listener :as listener]
+             [xt.substrate.base-frame :as frame]
+             [xt.substrate.base-space :as space]
+             [xt.substrate.base-router :as router]
+             [xt.substrate.base-json :as json]]})
+
+(l/script- :lua
+  {:runtime :basic
+   :require [[xt.lang.spec-base :as xt]
+             [xt.event.base-listener :as listener]
+             [xt.substrate.base-frame :as frame]
+             [xt.substrate.base-space :as space]
+             [xt.substrate.base-router :as router]
+             [xt.substrate.base-json :as json]]})
+
+(l/script- :python
+  {:runtime :basic
+   :require [[xt.lang.spec-base :as xt]
+             [xt.event.base-listener :as listener]
+             [xt.substrate.base-frame :as frame]
+             [xt.substrate.base-space :as space]
+             [xt.substrate.base-router :as router]
+             [xt.substrate.base-json :as json]]})
+
+(fact:global
+ {:setup [(l/rt:restart)]
+  :teardown [(l/rt:stop)]})
+
+^{:refer xt.event.base-listener/trigger-listeners :added "4.1"}
+(fact "listener containers preserve callback data, time, and listener metadata"
+
+  (!.js
+    (var container (listener/blank-container "events" {}))
+    (var seen [])
+    (listener/add-listener
+     container "listener-a" "change"
+     (fn [listener-id data event-time meta]
+       (xt/x:arr-push seen [listener-id
+                            (. data ["value"])
+                            event-time
+                            (. meta ["source"])]))
+     {:source "core"}
+     nil)
+    (listener/trigger-listeners container {:value 7 :time 11})
+    [(listener/list-listeners container)
+     seen
+     (listener/list-listener-types container)])
+  => [["listener-a"]
+      [["listener-a" 7 11 "core"]]
+      {"change" ["listener-a"]}]
+
+  (!.lua
+    (var container (listener/blank-container "events" {}))
+    (var seen [])
+    (listener/add-listener
+     container "listener-a" "change"
+     (fn [listener-id data event-time meta]
+       (xt/x:arr-push seen [listener-id
+                            (. data ["value"])
+                            event-time
+                            (. meta ["source"])]))
+     {:source "core"}
+     nil)
+    (listener/trigger-listeners container {:value 7 :time 11})
+    [(listener/list-listeners container)
+     seen
+     (listener/list-listener-types container)])
+  => [["listener-a"]
+      [["listener-a" 7 11 "core"]]
+      {"change" ["listener-a"]}]
+
+  (!.py
+    (var container (listener/blank-container "events" {}))
+    (var seen [])
+    (listener/add-listener
+     container "listener-a" "change"
+     (fn [listener-id data event-time meta]
+       (xt/x:arr-push seen [listener-id
+                            (. data ["value"])
+                            event-time
+                            (. meta ["source"])]))
+     {:source "core"}
+     nil)
+    (listener/trigger-listeners container {:value 7 :time 11})
+    [(listener/list-listeners container)
+     seen
+     (listener/list-listener-types container)])
+  => [["listener-a"]
+      [["listener-a" 7 11 "core"]]
+      {"change" ["listener-a"]}])
+
+^{:refer xt.substrate.base-frame/request-frame :added "4.1"}
+(fact "frame constructors preserve deterministic ids and discriminators"
+
+  (!.js
+    (var request (frame/request-frame "space/a" "echo" [1 2] {:id "req-1"}))
+    (var response (frame/response-ok-frame "req-1" "space/a" {:ok true} {:id "res-1"}))
+    (var stream (frame/stream-frame "space/a" "event/updated" {:value 9} {:id "evt-1"} {:request_id "req-1"}))
+    [(. request ["id"])
+     (. request ["action"])
+     (frame/request-frame? request)
+     (. response ["id"])
+     (. response ["status"])
+     (frame/response-frame? response)
+     (. stream ["id"])
+     (. stream ["signal"])
+     (frame/stream-frame? stream)])
+  => ["req-1" "echo" true "res-1" "ok" true "evt-1" "event/updated" true]
+
+  (!.lua
+    (var request (frame/request-frame "space/a" "echo" [1 2] {:id "req-1"}))
+    (var response (frame/response-ok-frame "req-1" "space/a" {:ok true} {:id "res-1"}))
+    (var stream (frame/stream-frame "space/a" "event/updated" {:value 9} {:id "evt-1"} {:request_id "req-1"}))
+    [(. request ["id"])
+     (. request ["action"])
+     (frame/request-frame? request)
+     (. response ["id"])
+     (. response ["status"])
+     (frame/response-frame? response)
+     (. stream ["id"])
+     (. stream ["signal"])
+     (frame/stream-frame? stream)])
+  => ["req-1" "echo" true "res-1" "ok" true "evt-1" "event/updated" true]
+
+  (!.py
+    (var request (frame/request-frame "space/a" "echo" [1 2] {:id "req-1"}))
+    (var response (frame/response-ok-frame "req-1" "space/a" {:ok true} {:id "res-1"}))
+    (var stream (frame/stream-frame "space/a" "event/updated" {:value 9} {:id "evt-1"} {:request_id "req-1"}))
+    [(. request ["id"])
+     (. request ["action"])
+     (frame/request-frame? request)
+     (. response ["id"])
+     (. response ["status"])
+     (frame/response-frame? response)
+     (. stream ["id"])
+     (. stream ["signal"])
+     (frame/stream-frame? stream)])
+  => ["req-1" "echo" true "res-1" "ok" true "evt-1" "event/updated" true])
+
+^{:refer xt.substrate.base-space/update-space-state :added "4.1"}
+(fact "space state can be created, listed, updated, and removed"
+
+  (!.js
+    (var node {:spaces {}})
+    (space/create-space node "space/a" {:state {:count 1} :meta {:owner "a"}})
+    (space/update-space-state
+     node "space/a"
+     (fn [state entry current-node]
+       (return {:count (+ (. state ["count"]) 1)})))
+    [(space/list-spaces node)
+     (space/get-space-state node "space/a")
+     (. (space/remove-space node "space/a") ["id"])
+     (space/list-spaces node)])
+  => [["space/a"] {"count" 2} "space/a" []]
+
+  (!.lua
+    (var node {:spaces {}})
+    (space/create-space node "space/a" {:state {:count 1} :meta {:owner "a"}})
+    (space/update-space-state
+     node "space/a"
+     (fn [state entry current-node]
+       (return {:count (+ (. state ["count"]) 1)})))
+    [(space/list-spaces node)
+     (space/get-space-state node "space/a")
+     (. (space/remove-space node "space/a") ["id"])
+     (space/list-spaces node)])
+  => [["space/a"] {"count" 2} "space/a" []]
+
+  (!.py
+    (var node {:spaces {}})
+    (space/create-space node "space/a" {:state {:count 1} :meta {:owner "a"}})
+    (space/update-space-state
+     node "space/a"
+     (fn [state entry current-node]
+       (return {:count (+ (. state ["count"]) 1)})))
+    [(space/list-spaces node)
+     (space/get-space-state node "space/a")
+     (. (space/remove-space node "space/a") ["id"])
+     (space/list-spaces node)])
+  => [["space/a"] {"count" 2} "space/a" []])
+
+^{:refer xt.substrate.base-router/unregister-connection :added "4.1"}
+(fact "router connection removal prunes its subscriptions"
+
+  (!.js
+    (var node {:router nil})
+    (router/register-connection node "transport-a" nil)
+    (router/register-connection node "transport-b" nil)
+    (router/add-subscription node "transport-a" "space/a" "event/updated" "sub-a" nil)
+    (router/add-subscription node "transport-b" "space/a" "event/updated" "sub-b" nil)
+    (var before (router/list-subscriptions node "space/a" "event/updated"))
+    (router/unregister-connection node "transport-a")
+    [before
+     (router/list-subscriptions node "space/a" "event/updated")
+     (xt/x:obj-keys (router/get-connections node))])
+  => [["transport-a" "transport-b"] ["transport-b"] ["transport-b"]]
+
+  (!.lua
+    (var node {:router nil})
+    (router/register-connection node "transport-a" nil)
+    (router/register-connection node "transport-b" nil)
+    (router/add-subscription node "transport-a" "space/a" "event/updated" "sub-a" nil)
+    (router/add-subscription node "transport-b" "space/a" "event/updated" "sub-b" nil)
+    (var before (router/list-subscriptions node "space/a" "event/updated"))
+    (router/unregister-connection node "transport-a")
+    [before
+     (router/list-subscriptions node "space/a" "event/updated")
+     (xt/x:obj-keys (router/get-connections node))])
+  => [["transport-a" "transport-b"] ["transport-b"] ["transport-b"]]
+
+  (!.py
+    (var node {:router nil})
+    (router/register-connection node "transport-a" nil)
+    (router/register-connection node "transport-b" nil)
+    (router/add-subscription node "transport-a" "space/a" "event/updated" "sub-a" nil)
+    (router/add-subscription node "transport-b" "space/a" "event/updated" "sub-b" nil)
+    (var before (router/list-subscriptions node "space/a" "event/updated"))
+    (router/unregister-connection node "transport-a")
+    [before
+     (router/list-subscriptions node "space/a" "event/updated")
+     (xt/x:obj-keys (router/get-connections node))])
+  => [["transport-a" "transport-b"] ["transport-b"] ["transport-b"]])
+
+^{:refer xt.substrate.base-json/decode-frame :added "4.1"}
+(fact "JSON transport validates frames and normalizes wire errors"
+
+  (!.js
+    (var request (frame/request-frame "space/a" "echo" [1] {:id "req-1"}))
+    (var decoded (json/decode-frame (json/encode-frame request)))
+    (var normalized (json/normalize-error {:error "boom"}))
+    [(json/valid-frame? decoded)
+     (. decoded ["id"])
+     (. decoded ["args"])
+     (. normalized ["message"])
+     (json/frame-kind? router/KIND_SUBSCRIBE)])
+  => [true "req-1" [1] "boom" true]
+
+  (!.lua
+    (var request (frame/request-frame "space/a" "echo" [1] {:id "req-1"}))
+    (var decoded (json/decode-frame (json/encode-frame request)))
+    (var normalized (json/normalize-error {:error "boom"}))
+    [(json/valid-frame? decoded)
+     (. decoded ["id"])
+     (. decoded ["args"])
+     (. normalized ["message"])
+     (json/frame-kind? router/KIND_SUBSCRIBE)])
+  => [true "req-1" [1] "boom" true]
+
+  (!.py
+    (var request (frame/request-frame "space/a" "echo" [1] {:id "req-1"}))
+    (var decoded (json/decode-frame (json/encode-frame request)))
+    (var normalized (json/normalize-error {:error "boom"}))
+    [(json/valid-frame? decoded)
+     (. decoded ["id"])
+     (. decoded ["args"])
+     (. normalized ["message"])
+     (json/frame-kind? router/KIND_SUBSCRIBE)])
+  => [true "req-1" [1] "boom" true])
