@@ -30,10 +30,12 @@ and archive:
 - [`core/java/`](core/java/) — the Java/Truffle runtime (Maven project, CLI, native-image).
 - [`core/rust/`](core/rust/) — the Rust/embedding runtime: native CLI, wasm builds, web
   loader, and in-tree wasm extensions ([`core/rust/extensions/`](core/rust/extensions/)).
-- [`core/lib/`](core/lib/) — hara-language source and workloads: the std foundation and
-  Talo compiler port (`core/lib/src`, `core/lib/test`), demo projects
-  ([`core/lib/examples/`](core/lib/examples/)), and benchmark suites
-  ([`core/lib/bench/`](core/lib/bench/)).
+- [`core/lib/`](core/lib/) — Hara-language sources and workloads. Compiler,
+  runtime, and host libraries use `core/lib/src` and `core/lib/test`; portable
+  `xt.*` and `postgres.*` libraries follow Foundation's split roots under
+  `core/lib/src-lang` and `core/lib/test-lang`. Demo projects live in
+  [`core/lib/examples/`](core/lib/examples/) and benchmark suites in
+  [`core/lib/bench/`](core/lib/bench/).
 - [`core/spec/`](core/spec/) — parity specifications and substrate tests for core
   language targets.
 - [`packaging/scripts/`](packaging/scripts/) — repo-level build/benchmark scripts.
