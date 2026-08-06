@@ -505,7 +505,7 @@
                    :mutable
                    (conj (or (get environment :mutable) #{}) symbol))
             condition (lower-expr (second control) next-environment)
-            iteration (third control)
+            iteration (nth control 2)
             iteration-forms (if (vector? iteration) iteration [iteration])
             loop-body (lower-body body next-environment)
             loop-step (lower-body iteration-forms next-environment)]
@@ -596,18 +596,18 @@
     (cond
       (= operation 'x:set-key)
       (lower-assignment ':=
-                        (list '. target [(third form)])
+                        (list '. target [(nth form 2)])
                         (nth form 3)
                         environment context)
 
       (= operation 'x:del-key)
-      (lower-delete (list '. target [(third form)])
+      (lower-delete (list '. target [(nth form 2)])
                     environment context)
 
       (= operation 'x:arr-push)
       (list 'tahto.runtime.hara-support/array-push!
             cell
-            (lower-expr (third form) environment))
+            (lower-expr (nth form 2) environment))
 
       (= operation 'x:arr-pop)
       (list 'tahto.runtime.hara-support/array-pop! cell)
@@ -615,7 +615,7 @@
       (= operation 'x:arr-push-first)
       (list 'tahto.runtime.hara-support/array-push-first!
             cell
-            (lower-expr (third form) environment))
+            (lower-expr (nth form 2) environment))
 
       (= operation 'x:arr-pop-first)
       (list 'tahto.runtime.hara-support/array-pop-first! cell)
@@ -623,13 +623,13 @@
       (= operation 'x:arr-insert)
       (list 'tahto.runtime.hara-support/array-insert!
             cell
-            (lower-expr (third form) environment)
+            (lower-expr (nth form 2) environment)
             (lower-expr (nth form 3) environment))
 
       (= operation 'x:arr-remove)
       (list 'tahto.runtime.hara-support/array-remove!
             cell
-            (lower-expr (third form) environment))
+            (lower-expr (nth form 2) environment))
 
       :else
       (fail "Unknown Hara mutation operation" form context))))
@@ -654,12 +654,12 @@
     (= operation 'x:get-idx)
     (list 'nth
           (lower-expr (second form) environment)
-          (lower-expr (third form) environment))
+          (lower-expr (nth form 2) environment))
 
     (= operation 'x:has-key?)
     (let [check (list 'has?
                       (lower-expr (second form) environment)
-                      (lower-expr (third form) environment))]
+                      (lower-expr (nth form 2) environment))]
       (if (> (count form) 3)
         (list '= (lower-expr (nth form 3) environment) check)
         check))
@@ -686,24 +686,24 @@
     (= operation 'x:arr-map)
     (list 'tahto.runtime.hara-support/array-map
           (lower-expr (second form) environment)
-          (lower-expr (third form) environment))
+          (lower-expr (nth form 2) environment))
 
     (= operation 'x:arr-foldl)
     (list 'reduce
-          (lower-expr (third form) environment)
+          (lower-expr (nth form 2) environment)
           (lower-expr (nth form 3) environment)
           (lower-expr (second form) environment))
 
     (= operation 'x:arr-foldr)
     (list 'tahto.runtime.hara-support/fold-right
           (lower-expr (second form) environment)
-          (lower-expr (third form) environment)
+          (lower-expr (nth form 2) environment)
           (lower-expr (nth form 3) environment))
 
     (= operation 'x:apply)
     (list 'apply
           (lower-expr (second form) environment)
-          (lower-expr (third form) environment))
+          (lower-expr (nth form 2) environment))
 
     (= operation 'x:nil?)
     (list 'nil? (lower-expr (second form) environment))
@@ -744,7 +744,7 @@
       (= operation 'if)
       (list 'if
             (lower-expr (second form) environment)
-            (lower-expr (third form) environment)
+            (lower-expr (nth form 2) environment)
             (if (> (count form) 3)
               (lower-expr (nth form 3) environment)
               nil))
@@ -767,7 +767,7 @@
       (has? +assignment-ops+ operation)
       (lower-assignment operation
                         (second form)
-                        (third form)
+                        (nth form 2)
                         environment context)
 
       (= operation 'return)
@@ -785,7 +785,7 @@
       (= operation ':?)
       (list 'if
             (lower-expr (second form) environment)
-            (lower-expr (third form) environment)
+            (lower-expr (nth form 2) environment)
             (lower-expr (nth form 3) environment))
 
       (or (= operation 'defn)
