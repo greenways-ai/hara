@@ -72,9 +72,10 @@ jobs:
       - name: Remove one-shot bootstrap machinery
         if: steps.guard.outputs.skip != 'true'
         run: |
-          git rm .github/workflows/bootstrap-lang-namespace-migration.yml
-          git rm .github/workflows/validate-lang-namespace-migration.yml
-          git rm packaging/scripts/migrate-tahto-to-lang
+          git rm -f --ignore-unmatch -- \
+            .github/workflows/bootstrap-lang-namespace-migration.yml \
+            .github/workflows/validate-lang-namespace-migration.yml \
+            packaging/scripts/migrate-tahto-to-lang
 
       - name: Commit and push generated migration
         if: steps.guard.outputs.skip != 'true'
