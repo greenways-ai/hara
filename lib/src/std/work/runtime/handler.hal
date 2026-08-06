@@ -1,0 +1,302 @@
+(ns std.work.runtime.handler
+  (:require [std.work.runtime.base :as base]
+            [std.work.runtime.frame :as frame]))
+
+(defn run-pure
+  [execute runtime frame spec input]
+  ((:fn spec) input (frame/leaf-context (frame/leaf-frame frame spec))))
+
+(defn retry-allowed?
+  [retry error]
+  (let [predicate (:retry? retry)]
+    (if predicate
+      (if (predicate error) true false)
+      true)))
+
+(defn step-attempt
+  [runtime frame spec input attempt maximum]
+  (try
+    (let [context (assoc (frame/leaf-context frame) :attempt attempt)]
+      [((:fn spec) input context) attempt])
+    (catch Throwable error
+      (if (and (< attempt maximum)
+               (retry-allowed? (or (:retry spec) {}) error))
+        (do
+          (frame/emit! runtime frame :work/step-retry
+                 {:step/id (:id spec)
+                  :attempt attempt
+                  :next-attempt (inc attempt)})
+          (step-attempt runtime frame spec input (inc attempt) maximum))
+        (do
+          (frame/emit! runtime frame :work/step-failed
+                 {:step/id (:id spec)
+                  :attempt attempt
+                  :error (str error)})
+          (throw error))))))
+
+(defn assert-step-identity!
+  [runtime spec]
+  (if (and (base/durable? runtime)
+           (nil? (:id spec)))
+    (throw
+     (ex-info "Durable step work requires a stable :id"
+              {:operation (:op spec)})))
+  spec)
+
+(defn run-step
+  [execute runtime frame spec input]
+  (let [_ (assert-step-identity! runtime spec)
+        frame (frame/leaf-frame frame spec)
+        key (frame/checkpoint-key frame)
+        checkpoint
+        (if (base/durable? runtime)
+          (base/backend-call (base/runtime-backend runtime) :load-checkpoint key)
+          nil)]
+    (if (= :completed (:checkpoint/status checkpoint))
+      (do
+        (frame/emit! runtime frame :work/step-replayed
+               {:step/id (:id spec)
+                :checkpoint/key key})
+        (:checkpoint/result checkpoint))
+      (let [retry (or (:retry spec) {})
+            maximum (or (:maximum retry) 1)
+            _ (frame/emit! runtime frame :work/step-started
+                     {:step/id (:id spec)
+                      :checkpoint/key key})
+            [result attempts]
+            (step-attempt runtime frame spec input 1 maximum)]
+        (if (base/durable? runtime)
+          (base/backend-call
+           (base/runtime-backend runtime)
+           :commit-checkpoint
+           {:checkpoint/run (:run/id frame)
+            :checkpoint/key key
+            :checkpoint/work-root (:work/root frame)
+            :checkpoint/node-path (:node/path frame)
+            :checkpoint/item-id (:item/id frame)
+            :checkpoint/status :completed
+            :checkpoint/input input
+            :checkpoint/result result
+            :checkpoint/attempts attempts}))
+        (frame/emit! runtime frame :work/step-completed
+               {:step/id (:id spec)
+                :checkpoint/key key
+                :attempts attempts})
+        result))))
+
+(defn run-chain
+  [execute runtime frame spec input]
+  (let [children (vec (:children spec))]
+    (loop [index 0
+           value input]
+      (if (= index (count children))
+        value
+        (let [child (nth children index)
+              child-spec (base/work-spec-map child)
+              child-frame (frame/child-frame frame :chain index child-spec)]
+          (recur (inc index)
+                 (execute runtime child-frame child value)))))))
+
+(defn run-each
+  [execute runtime frame spec input]
+  (let [manifest (frame/normalise-manifest runtime spec input)
+        child (:work spec)
+        child-spec (base/work-spec-map child)
+        base-frame (frame/child-frame frame :each child-spec)]
+    (loop [index 0
+           output []]
+      (if (= index (count manifest))
+        output
+        (let [item (nth manifest index)
+              item-id (:item/id item)
+              value (execute runtime
+                             (frame/item-frame base-frame item-id)
+                             child
+                             (:item/value item))]
+          (recur (ilÈ[™^
+Bˆ
+ÛÛšˆÝ]]ˆÎš][KÚY][KZYˆš][KÝ˜[YH˜[Y_JJJJJJJB‚ŠY›ˆ[‹Yš[\‚ˆÙ^XÝ]H[[YHœ˜[YHÜXÈ[œ]Bˆ
+]ÛX[šY™\Ý
+œ˜[YKÛ›Ü›X[\ÙK[X[šY™\Ý[[YHÜXÈ[œ]
+Bˆ™YXØ]H
+ÛÜšÈÜXÊBˆ™YXØ]K\ÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\™YXØ]JBˆ˜\ÙKYœ˜[YH
+œ˜[YKØÚ[Yœ˜[YHœ˜[YH™š[\ˆ™YXØ]K\ÜXÊWBˆ
+ÛÜÚ[™^ˆÝ]]×WBˆ
+Yˆ
+H[™^
+ÛÝ[X[šY™\Ý
+JBˆÝ]]ˆ
+]Ú][H
+X[šY™\Ý[™^
+BˆÙ[XÝYˆ
+^XÝ]H[[YBˆ
+œ˜[YKÚ][KYœ˜[YH˜\ÙKYœ˜[YH
+š][KÚY][JJBˆ™YXØ]Bˆ
+š][KÝ˜[YH][JJWBˆ
+™XÝ\ˆ
+[˜È[™^
+Bˆ
+YˆÙ[XÝYˆ
+ÛÛšˆÝ]]][JBˆÝ]]
+JJJJJJB‚ŠY›ˆ[‹Y›ÛˆÙ^XÝ]H[[YHœ˜[YHÜXÈ[œ]Bˆ
+]ÛX[šY™\Ý
+œ˜[YKÛ›Ü›X[\ÙK[X[šY™\Ý[[YHÜXÈ[œ]
+Bˆ™YXÙ\ˆ
+ÛÜšÈÜXÊBˆ™YXÙ\‹\ÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\™YXÙ\ŠBˆ˜\ÙKYœ˜[YH
+œ˜[YKØÚ[Yœ˜[YHœ˜[YH™›Û™YXÙ\‹\ÜXÊWBˆ
+ÛÜÚ[™^ˆXØÝ[][]Üˆ
+š[š]X[ÜXÊWBˆ
+Yˆ
+H[™^
+ÛÝ[X[šY™\Ý
+JBˆXØÝ[][]Ü‚ˆ
+]Ú][H
+X[šY™\Ý[™^
+Bˆ™^]˜[YBˆ
+^XÝ]H[[YBˆ
+œ˜[YKÚ][KYœ˜[YH˜\ÙKYœ˜[YH
+š][KÚY][JJBˆ™YXÙ\‚ˆÎ˜XØÈXØÝ[][]Ü‚ˆš][KÚY
+š][KÚY][JBˆš][KÝ˜[YH
+š][KÝ˜[YH][J_JWBˆ
+™XÝ\ˆ
+[˜È[™^
+H™^]˜[YJJJJJJB‚ŠY›ˆ[‹X[ˆÙ^XÝ]H[[YHœ˜[YHÜXÈ[œ]Bˆ
+]ØÚ[™[ˆ
+™XÈ
+˜Ú[™[ˆÜXÊJWBˆ
+ÛÜÚ[™^ˆÝ]]×WBˆ
+Yˆ
+H[™^
+ÛÝ[Ú[™[ŠJBˆÝ]]ˆ
+]ØÚ[
+Ú[™[ˆ[™^
+BˆÚ[\ÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\Ú[
+BˆÚ[Yœ˜[YH
+œ˜[YKØÚ[Yœ˜[YHœ˜[YH˜[[™^Ú[\ÜXÊWBˆ
+™XÝ\ˆ
+[˜È[™^
+Bˆ
+ÛÛšˆÝ]]ˆ
+^XÝ]H[[YHÚ[Yœ˜[YHÚ[[œ]
+JJJJJJJB‚ŠY›ˆ[‹XÚÛÜÙBˆÙ^XÝ]H[[YHœ˜[YHÜXÈ[œ]Bˆ
+]ÜÙ[XÝÜˆ
+œÙ[XÝÜˆÜXÊBˆÙ[XÝÜ‹\ÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\Ù[XÝÜŠBˆÙ[XÝYˆ
+^XÝ]H[[YBˆ
+œ˜[YKØÚ[Yœ˜[YHœ˜[YH˜ÚÛÜÙHœÙ[XÝÜˆÙ[XÝÜ‹\ÜXÊBˆÙ[XÝÜ‚ˆ[œ]
+BˆÚÚXÙH
+Ù]
+˜ÚÚXÙ\ÈÜXÊHÙ[XÝY
+WBˆ
+YˆÚÚXÙBˆ
+]ØÚÚXÙK\ÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\ÚÚXÙJWBˆ
+^XÝ]H[[YBˆ
+œ˜[YKØÚ[Yœ˜[YHœ˜[YH˜ÚÛÜÙHÙ[XÝYÚÚXÙK\ÜXÊBˆÚÚXÙBˆ[œ]
+JBˆ
+›ÝÂˆ
+^Z[™›È•ÛÜšÈÚÚXÙHÙ\È›Ý^\Ý‚ˆÎœÙ[XÝYÙ[XÝYˆ˜ÚÚXÙ\È
+Ù^\È
+˜ÚÚXÙ\ÈÜXÊJ_JJJJJB‚ŠY›ˆ[‹X˜]ÚYš[\‚ˆÙ^XÝ]H[[YHœ˜[YHš[\‹]ÛÜšÈX[šY™\ÝBˆ
+Yˆ
+š[Èš[\‹]ÛÜšÊBˆX[šY™\Ýˆ
+]Ùš[\‹\ÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\š[\‹]ÛÜšÊBˆ˜\ÙKYœ˜[YH
+œ˜[YKØÚ[Yœ˜[YHœ˜[YH˜˜]Ú™š[\ˆš[\‹\ÜXÊWBˆ
+ÛÜÚ[™^ˆÝ]]×WBˆ
+Yˆ
+H[™^
+ÛÝ[X[šY™\Ý
+JBˆÝ]]ˆ
+]Ú][H
+X[šY™\Ý[™^
+BˆÙ[XÝYˆ
+^XÝ]H[[YBˆ
+œ˜[YKÚ][KYœ˜[YH˜\ÙKYœ˜[YH
+š][KÚY][JJBˆš[\‹]ÛÜšÂˆ
+š][KÝ˜[YH][JJWBˆ
+™XÝ\ˆ
+[˜È[™^
+Bˆ
+YˆÙ[XÝYˆ
+ÛÛšˆÝ]]][JBˆÝ]]
+JJJJJJJB‚ŠY›ˆ[‹X˜]Ú\›ØÙ\ÜÂˆÙ^XÝ]H[[YHœ˜[YH›ØÙ\ÜË]ÛÜšÈX[šY™\ÝBˆ
+]Ü›ØÙ\ÜË\ÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\›ØÙ\ÜË]ÛÜšÊBˆ˜\ÙKYœ˜[YH
+œ˜[YKØÚ[Yœ˜[YHœ˜[YH˜˜]Úœ›ØÙ\ÜÈ›ØÙ\ÜË\ÜXÊWBˆ
+ÛÜÚ[™^ˆÝ]]×WBˆ
+Yˆ
+H[™^
+ÛÝ[X[šY™\Ý
+JBˆÝ]]ˆ
+]Ú][H
+X[šY™\Ý[™^
+Bˆ™\Ý[ˆ
+^XÝ]H[[YBˆ
+œ˜[YKÚ][KYœ˜[YH˜\ÙKYœ˜[YH
+š][KÚY][JJBˆ›ØÙ\ÜË]ÛÜšÂˆ
+š][KÝ˜[YH][JJWBˆ
+™XÝ\ˆ
+[˜È[™^
+Bˆ
+ÛÛšˆÝ]]ˆÎš][KÚY
+š][KÚY][JBˆš][KÝ˜[YH™\Ý[JJJJJJJB‚ŠY›ˆ™\]Z\™Y\ÝYÙBˆÜÜXÈÝYÙWBˆ
+]ÝÛÜšÈ
+Ù]ÜXÈÝYÙJWBˆ
+Yˆ
+š[ÈÛÜšÊBˆ
+›ÝÂˆ
+^Z[™›È˜]ÚÛÜšÈ™\]Z\™\ÈHÝYÙH‚ˆÎœÝYÙHÝYÙBˆÛÜšËÚY
+šYÜXÊ_JJBˆÛÜšÊJJB‚ŠY›ˆ[‹X˜]ÚˆÙ^XÝ]H[[YHœ˜[YHÜXÈ[œ]Bˆ
+]Û\Ý]ÛÜšÈ
+™\]Z\™Y\ÝYÙHÜXÈ›\Ý
+Bˆ\Ý\ÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\\Ý]ÛÜšÊBˆ\ÝYœ˜[YBˆ
+œ˜[YKØÚ[Yœ˜[YHœ˜[YH˜˜]Ú›\Ý\Ý\ÜXÊBˆ\ÝY
+^XÝ]H[[YH\ÝYœ˜[YH\Ý]ÛÜšÈ[œ]
+BˆX[šY™\Ý
+œ˜[YKÛ›Ü›X[\ÙK[X[šY™\Ý[[YHÜXÈ\ÝY
+BˆÙ[XÝYˆ
+[‹X˜]ÚYš[\ˆ^XÝ]H[[YHœ˜[YH
+™š[\ˆÜXÊHX[šY™\Ý
+Bˆ›ØÙ\ÜË]ÛÜšÈ
+™\]Z\™Y\ÝYÙHÜXÈœ›ØÙ\ÜÊBˆ›ØÙ\ÜÙYˆ
+[‹X˜]Ú\›ØÙ\ÜÈ^XÝ]H[[YHœ˜[YH›ØÙ\ÜË]ÛÜšÈÙ[XÝY
+BˆÝ[[X\žKZ[œ]ˆÎš][\ÈÙ[XÝYˆœ™\Ý[È›ØÙ\ÜÙYBˆÝ[[X\š\ÙK]ÛÜšÈ
+œÝ[[X\š\ÙHÜXÊBˆÝ[[X\žBˆ
+YˆÝ[[X\š\ÙK]ÛÜšÂˆ
+]ÜÝ[[X\žK\ÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\Ý[[X\š\ÙK]ÛÜšÊBˆÝ[[X\žKYœ˜[YBˆ
+œ˜[YKØÚ[Yœ˜[YHœ˜[YH˜˜]ÚœÝ[[X\š\ÙHÝ[[X\žK\ÜXÊWBˆ
+^XÝ]H[[YBˆÝ[[X\žKYœ˜[YBˆÝ[[X\š\ÙK]ÛÜšÂˆÝ[[X\žKZ[œ]
+JBˆÝ[[X\žKZ[œ]
+WBˆÎš][\ÈÙ[XÝYˆœ™\Ý[È›ØÙ\ÜÙYˆœÝ[[X\žHÝ[[X\ž_JJB‚ŠYˆY˜][Z[™\œÂˆÎœ\™H[‹\\™BˆœÝ\[‹\Ý\ˆ˜ÚZ[ˆ[‹XÚZ[‚ˆ™XXÚ[‹YXXÚˆ™š[\ˆ[‹Yš[\‚ˆ™›Û[‹Y›Ûˆ˜[[‹X[ˆ˜ÚÛÜÙH[‹XÚÛÜÙBˆ˜˜]Ú[‹X˜]ÚJB‚ŠY›ˆ^XÝ]K[›ÙBˆÜ[[YHœ˜[YHÛÜšÈ[œ]Bˆ
+œ˜[YKØ\ÜÙ\\[›š[™ÈH[[YHœ˜[YJBˆ
+]ÜÜXÈ
+˜\ÙKÝÛÜšË\ÜXË[X\ÛÜšÊBˆÜ\˜][Ûˆ
+›ÜÜXÊBˆ[™\ˆ
+Ù]
+˜\ÙKÜ[[YKZ[™\œÈ[[YJHÜ\˜][ÛŠWBˆ
+Yˆ
+š[È[™\ŠBˆ
+›ÝÂˆ
+^Z[™›È•ÛÜšÈÜ\˜][Ûˆ\È›Ý[œÝ[Y‚ˆÎ›Ü\˜][ÛˆÜ\˜][Û‚ˆ››ÙKÜ]
+››ÙKÜ]œ˜[YJ_JJBˆ
+Âˆ
+œ˜[YKÙ[Z]H[[YHœ˜[YHÛÜšËÛ›ÙK\Ý\YˆÎ›Ü\˜][ÛˆÜ\˜][Û‚ˆ››ÙKÚY
+šYÜXÊ_JBˆ
+žBˆ
+]Ü™\Ý[
+[™\ˆ^XÝ]K[›ÙH[[YHœ˜[YHÜXÈ[œ]
+WBˆ
+œ˜[YKÙ[Z]H[[YHœ˜[YHÛÜšËÛ›ÙKXÛÛ\]YˆÎ›Ü\˜][ÛˆÜ\˜][Û‚ˆ››ÙKÚY
+šYÜXÊ_JBˆ™\Ý[
+Bˆ
+Ø]Ú›ÝØX›H\œ›Ü‚ˆ
+œ˜[YKÙ[Z]H[[YHœ˜[YHÛÜšËÛ›ÙKY˜Z[YˆÎ›Ü\˜][ÛˆÜ\˜][Û‚ˆ››ÙKÚY
+šYÜXÊBˆ™\œ›Üˆ
+Ýˆ\œ›ÜŠ_JBˆ
+›ÝÈ\œ›ÜŠJJJJJJB‚ŽÎÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBŽÎÈ[ˆY™XÞXÛBŽÎÈKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB

@@ -1,0 +1,126 @@
+(ns std.work.runtime.base
+  (:require [std.work.protocol :as protocol]))
+
+(defstruct Work [spec])
+(defstruct WorkRef [id])
+(defstruct WorkObserver [function state])
+(defstruct Runtime
+  [mode backend handlers observer definitions runtime-version schema-version])
+
+(defn runtime-mode
+  [runtime]
+  (field runtime :mode))
+
+(defn runtime-backend
+  [runtime]
+  (field runtime :backend))
+
+(defn runtime-handlers
+  [runtime]
+  (field runtime :handlers))
+
+(defn runtime-observer
+  [runtime]
+  (field runtime :observer))
+
+(defn runtime-definitions
+  [runtime]
+  (field runtime :definitions))
+
+(defn runtime-code-version
+  [runtime]
+  (field runtime :runtime-version))
+
+(defn runtime-schema-version
+  [runtime]
+  (field runtime :schema-version))
+
+(extend-type Work protocol/IWork
+  (work-spec [work]
+    (field work :spec)))
+
+(extend-type WorkObserver protocol/IWorkObserver
+  (work-event [observer event]
+    ((field observer :function) event)))
+
+(defn work-value
+  [spec]
+  (std.work.runtime.base/Work spec))
+
+(defn work-spec-map
+  [work]
+  (if (and (map? work)
+           (has? work :op))
+    work
+    (if (nil? work)
+      (throw (ex-info "Work value cannot be nil" {}))
+      (let [spec (protocol/work-spec work)]
+        (if (map? spec)
+          spec
+          (throw
+           (ex-info "IWork/work-spec must return a map"
+                    {:work work
+                     :spec spec})))))))
+
+(defn work-reference
+  [id]
+  (std.work.runtime.base/WorkRef id))
+
+(defn reference-id
+  [reference]
+  (if (instance? std.work.runtime.base/WorkRef reference)
+    (field reference :id)
+    reference))
+
+(defn observer
+  [function]
+  (std.work.runtime.base/WorkObserver function nil))
+
+(defn recording-observer
+  []
+  (let [state (atom [])]
+    (std.work.runtime.base/WorkObserver
+     (fn [event]
+       (swap! state conj event))
+     state)))
+
+(defn observer-events
+  [observer]
+  (let [state (if observer (field observer :state) nil)]
+    (if state
+      (vec (deref state))
+      [])))
+
+;; ---------------------------------------------------------------------------
+;; Private backend seam
+;; ---------------------------------------------------------------------------
+
+(defn backend-call
+  [backend operation & arguments]
+  (let [function (get backend operation)]
+    (if function
+      (apply function arguments)
+      (throw
+       (ex-info "Work backend operation is not installed"
+                {:operation operation})))))
+
+(defn compatible-run?
+  [existing proposed]
+  (and (= (:run/work-root existing) (:run/work-root proposed))
+       (= (:run/work-version existing) (:run/work-version proposed))
+       (= (:run/input existing) (:run/input proposed))))
+
+(defn durable?
+  [runtime]
+  (= :durable (runtime-mode runtime)))
+
+(defn register-definition!
+  [runtime root version work]
+  (swap! (runtime-definitions runtime) assoc [root version] work)
+  work)
+
+(defn resolve-definition
+  [runtime root version]
+  (get (deref (runtime-definitions runtime)) [root version]))
+
+;; ---------------------------------------------------------------------------

@@ -1,0 +1,339 @@
+(ns std.work.runtime.lifecycle
+  (:require [std.work.protocol :as protocol]
+            [std.work.runtime.base :as base]
+            [std.work.runtime.frame :as frame]
+            [std.work.runtime.handler :as handler]))
+
+(defn runtime-root
+  [runtime spec options]
+  (let [root (or (:work-root options)
+                 (:root spec)
+                 (:id spec))]
+    (if root
+      root
+      (if (base/durable? runtime)
+        (throw
+         (ex-info
+          "Durable work requires :work-root or a root :id"
+          {:operation (:op spec)}))
+        :anonymous))))
+
+(defn definition-version
+  [spec options]
+  (or (:work-version options)
+      (:version spec)
+      1))
+
+(defn register-work
+  [runtime work options]
+  (let [options (or options {})
+        spec (base/work-spec-map work)
+        root (runtime-root runtime spec options)
+        version (definition-version spec options)]
+    (base/register-definition! runtime root version work)))
+
+(defn initial-frame
+  [run options]
+  {:run/id (:run/id run)
+   :work/root (:run/work-root run)
+   :work/version (:run/work-version run)
+   :node/path []
+   :item/id nil
+   :item/path []
+   :context (or (:context options) {})
+   :options options})
+
+(defn execute-run!
+  [runtime run work options]
+  (let [id (:run/id run)
+        frame (initial-frame run options)]
+    (base/backend-call (base/runtime-backend runtime)
+                  :update-run
+                  id
+                  {:run/status :running
+                   :run/error nil
+                   :run/options options})
+    (frame/emit! runtime frame :work/run-started
+           {:run/version (:run/work-version run)})
+    (try
+      (let [result (handler/execute-node runtime frame work (:run/input run))]
+        (base/backend-call (base/runtime-backend runtime)
+                      :update-run
+                      id
+                      {:run/status :completed
+                       :run/result result
+                       :run/error nil})
+        (frame/emit! runtime frame :work/run-completed {:result result})
+        (base/work-reference id))
+      (catch Throwable error
+        (let [current
+              (base/backend-call (base/runtime-backend runtime) :load-run id)]
+          (if (= :cancelled (:run/status current))
+            (frame/emit! runtime frame :work/run-cancelled
+                   {:error (str error)})
+            (do
+              (base/backend-call (base/runtime-backend runtime)
+                            :update-run
+                            id
+                            {:run/status :failed
+                             :run/error (str error)})
+              (frame/emit! runtime frame :work/run-failed
+                     {:error (str error)}))))
+        (base/work-reference id)))))
+
+(defn start-run
+  [runtime work input options]
+  (let [options (or options {})
+        spec (base/work-spec-map work)
+        root (runtime-root runtime spec options)
+        version (definition-version spec options)
+        id (or (:id options)
+               (base/backend-call (base/runtime-backend runtime) :next-run-id))
+        proposed
+        {:run/id id
+         :run/work-root root
+         :run/work-version version
+         :run/runtime-version (base/runtime-code-version runtime)
+         :run/schema-version (base/runtime-schema-version runtime)
+         :run/status :created
+         :run/input input
+         :run/result nil
+         :run/error nil
+         :run/options options
+         :run/attributes (or (:attributes options) {})}
+        existing (base/backend-call (base/runtime-backend runtime) :load-run id)]
+    (register-work runtime work options)
+    (if existing
+      (if (base/compatible-run? existing proposed)
+        (base/work-reference id)
+        (throw
+         (ex-info "Work run identity conflicts with existing input"
+                  {:run/id id})))
+      (let [run (base/backend-call (base/runtime-backend runtime) :create-run proposed)]
+        (execute-run! runtime run work options)))))
+
+(defn query-run
+  [runtime reference options]
+  (let [query (:query options)
+        id (base/reference-id reference)]
+    (cond
+      (= query :runs)
+      (base/backend-call (base/runtime-backend runtime)
+                    :list-runs
+                    (or (:where options) {}))
+
+      (= query :history)
+      (base/backend-call (base/runtime-backend runtime) :list-events id)
+
+      (= query :checkpoints)
+      (base/backend-call (base/runtime-backend runtime) :list-checkpoints id)
+
+      :else
+      (let [run (base/backend-call (base/runtime-backend runtime) :load-run id)]
+        (cond
+          (= query :status) (:run/status run)
+          (= query :result) (:run/result run)
+          (= query :error) (:run/error run)
+          (= query :run) run
+          :else
+          (throw
+           (ex-info "Work runtime query is not supported"
+                    {:query query})))))))
+
+(defn resume-run
+  [runtime reference options]
+  (let [id (base/reference-id reference)
+        run (base/backend-call (base/runtime-backend runtime) :load-run id)]
+    (if (nil? run)
+      (throw (ex-info "Work run does not exist" {:run/id id}))
+      (if (= :completed (:run/status run))
+        (base/work-reference id)
+        (let [work
+              (base/resolve-definition runtime
+                                  (:run/work-root run)
+                                  (:run/work-version run))]
+          (if (nil? work)
+            (throw
+             (ex-info "Pinned work definition is not available"
+                      {:work/root (:run/work-root run)
+                       :work/version (:run/work-version run)}))
+            (execute-run! runtime
+                          run
+                          work
+                          (merge (or (:run/options run) {})
+                                 (or options {})
+                                 {:work-root (:run/work-root run)
+                                  :work-version (:run/work-version run)}))))))))
+
+(defn terminal-status?
+  [status]
+  (or (= :completed status)
+      (= :failed status)
+      (= :cancelled status)))
+
+(defn cancel-run
+  [runtime reference options]
+  (let [id (base/reference-id reference)
+        current (base/backend-call (base/runtime-backend runtime) :load-run id)]
+    (if (nil? current)
+      (throw (ex-info "Work run does not exist" {:run/id id}))
+      (if (terminal-status? (:run/status current))
+        (base/work-reference id)
+        (let [run (base/backend-call (base/runtime-backend runtime)
+                                :update-run
+                                id
+                                {:run/status :cancelled})
+              frame
+              (initial-frame
+               run
+               (merge (or (:run/options run) {})
+                      (or options {})))]
+          (frame/emit! runtime frame :work/run-cancel-requested
+                 {:reason (:reason options)})
+          (base/work-reference id))))))
+
+(defn path-last
+  [path]
+  (if (empty? path)
+    nil
+    (nth path (dec (count path)))))
+
+(defn checkpoint-selected?
+  [checkpoint selected]
+  (or (= selected (:checkpoint/key checkpoint))
+      (= selected (:checkpoint/node-path checkpoint))
+      (= selected
+         (path-last (:checkpoint/node-path checkpoint)))))
+
+(defn selected-checkpoint
+  [checkpoints selected]
+  (let [checkpoints (vec checkpoints)]
+    (loop [index 0
+           match nil]
+      (if (= index (count checkpoints))
+        match
+        (let [checkpoint (nth checkpoints index)]
+          (if (checkpoint-selected? checkpoint selected)
+            (if match
+              (throw
+               (ex-info "Fork checkpoint selector is ambiguous"
+                        {:checkpoint selected}))
+              (recur (inc index) checkpoint))
+            (recur (ilÈ[™^
+HX]Ú
+JJJJJJB‚ŠY›ˆÛÜKXÚXÚÜÚ[ËX™Y›Ü™HBˆÜ[[YHÛİ\˜ÙKZY\™Ù]ZYÙ[XİYBˆ
+]ØÚXÚÜÚ[Âˆ
+˜\ÙKØ˜XÚÙ[™XØ[
+˜\ÙKÜ[[YKX˜XÚÙ[™[[YJH›\İXÚXÚÜÚ[ÈÛİ\˜ÙKZY
+BˆÙ[XİY\™XÛÜ™
+Ù[XİYXÚXÚÜÚ[ÚXÚÜÚ[ÈÙ[XİY
+Bˆ™Y›Ü™Bˆ
+YˆÙ[XİY\™XÛÜ™ˆ
+˜ÚXÚÜÚ[ÜÙ\]Y[˜ÙHÙ[XİY\™XÛÜ™
+Bˆ
+WBˆ
+Yˆ
+[™Ù[XİY
+š[ÈÙ[XİY\™XÛÜ™
+JBˆ
+›İÂˆ
+^Z[™›È‘›ÜšÈÚXÚÜÚ[Ù\È›İ^\İ‚ˆÎœ[‹ÚYÛİ\˜ÙKZYˆ˜ÚXÚÜÚ[Ù[XİYJJJBˆ
+™YXÙBˆ
+›ˆØÛÜYYÚXÚÜÚ[Bˆ
+Yˆ
+
+˜ÚXÚÜÚ[ÜÙ\]Y[˜ÙHÚXÚÜÚ[
+H™Y›Ü™JBˆ
+]ÛÛZÙ^H
+™XÈ
+˜ÚXÚÜÚ[ÚÙ^HÚXÚÜÚ[
+JBˆ™]ËZÙ^H
+\ÜÛØÈÛZÙ^H\™Ù]ZY
+BˆÛÛ™Bˆ
+\ÜÛØÈÚXÚÜÚ[ˆ˜ÚXÚÜÚ[Ü[ˆ\™Ù]ZYˆ˜ÚXÚÜÚ[ÚÙ^H™]ËZÙ^JWBˆ
+˜\ÙKØ˜XÚÙ[™XØ[
+˜\ÙKÜ[[YKX˜XÚÙ[™[[YJBˆ˜ÛÛ[Z]XÚXÚÜÚ[ˆÛÛ™JBˆ
+[˜ÈÛÜYY
+JBˆÛÜYY
+JBˆˆÚXÚÜÚ[ÊJJB‚ŠY›ˆ›ÜšË\[‚ˆÜ[[YH™Y™\™[˜ÙHÜ[Ûœ×Bˆ
+]ÛÜ[ÛœÈ
+ÜˆÜ[ÛœÈßJBˆÛİ\˜ÙKZY
+˜\ÙKÜ™Y™\™[˜ÙKZY™Y™\™[˜ÙJBˆÛİ\˜ÙBˆ
+˜\ÙKØ˜XÚÙ[™XØ[
+˜\ÙKÜ[[YKX˜XÚÙ[™[[YJH›ØY\[ˆÛİ\˜ÙKZY
+WBˆ
+Yˆ
+š[ÈÛİ\˜ÙJBˆ
+›İÈ
+^Z[™›È•ÛÜšÈ[ˆÙ\È›İ^\İˆÎœ[‹ÚYÛİ\˜ÙKZYJJBˆ
+]ÚY
+Üˆ
+šYÜ[ÛœÊBˆ
+˜\ÙKØ˜XÚÙ[™XØ[
+˜\ÙKÜ[[YKX˜XÚÙ[™[[YJH›™^\[‹ZY
+JBˆÛÜšÂˆ
+˜\ÙKÜ™\ÛÛ™KYYš[š][Ûˆ[[YBˆ
+œ[‹İÛÜšË\›ÛİÛİ\˜ÙJBˆ
+œ[‹İÛÜšË]™\œÚ[ÛˆÛİ\˜ÙJJBˆ›ÜšË[Ü[ÛœÂˆ
+Y\™ÙH
+Üˆ
+œ[‹ÛÜ[ÛœÈÛİ\˜ÙJHßJBˆÜ[ÛœÂˆÎÛÜšË\›Ûİ
+œ[‹İÛÜšË\›ÛİÛİ\˜ÙJBˆÛÜšË]™\œÚ[Ûˆ
+œ[‹İÛÜšË]™\œÚ[ÛˆÛİ\˜ÙJ_JBˆ›ÜÜÙYˆÎœ[‹ÚYYˆœ[‹İÛÜšË\›Ûİ
+œ[‹İÛÜšË\›ÛİÛİ\˜ÙJBˆœ[‹İÛÜšË]™\œÚ[Ûˆ
+œ[‹İÛÜšË]™\œÚ[ÛˆÛİ\˜ÙJBˆœ[‹Ü[[YK]™\œÚ[Ûˆ
+˜\ÙKÜ[[YKXÛÙK]™\œÚ[Ûˆ[[YJBˆœ[‹ÜØÚ[XK]™\œÚ[Ûˆ
+˜\ÙKÜ[[YK\ØÚ[XK]™\œÚ[Ûˆ[[YJBˆœ[‹Üİ]\È˜Ü™X]Yˆœ[‹Ú[œ]
+œ[‹Ú[œ]Ûİ\˜ÙJBˆœ[‹Ü™\İ[š[ˆœ[‹Ù\œ›Üˆš[ˆœ[‹ÛÜ[ÛœÈ›ÜšË[Ü[ÛœÂˆœ[‹Ù›ÜšÙYYœ›ÛHÛİ\˜ÙKZYˆœ[‹Ù›ÜšËXÚXÚÜÚ[
+˜ÚXÚÜÚ[Ü[ÛœÊBˆœ[‹Ø]šX]\Âˆ
+Y\™ÙH
+œ[‹Ø]šX]\ÈÛİ\˜ÙJBˆ
+Üˆ
+˜]šX]\ÈÜ[ÛœÊHßJJ_Bˆ^\İ[™Âˆ
+˜\ÙKØ˜XÚÙ[™XØ[
+˜\ÙKÜ[[YKX˜XÚÙ[™[[YJH›ØY\[ˆY
+WBˆ
+Yˆ
+š[ÈÛÜšÊBˆ
+›İÂˆ
+^Z[™›È”[›™YÛÜšÈYš[š][Ûˆ\È›İ]˜Z[X›H‚ˆÎÛÜšËÜ›Ûİ
+œ[‹İÛÜšË\›ÛİÛİ\˜ÙJBˆÛÜšËİ™\œÚ[Ûˆ
+œ[‹İÛÜšË]™\œÚ[ÛˆÛİ\˜ÙJ_JJJBˆ
+Yˆ^\İ[™Âˆ
+Yˆ
+[™
+˜\ÙKØÛÛ\]X›K\[È^\İ[™È›ÜÜÙY
+Bˆ
+HÛİ\˜ÙKZY
+œ[‹Ù›ÜšÙYYœ›ÛH^\İ[™ÊJBˆ
+H
+˜ÚXÚÜÚ[Ü[ÛœÊBˆ
+œ[‹Ù›ÜšËXÚXÚÜÚ[^\İ[™ÊJJBˆ
+˜\ÙKİÛÜšË\™Y™\™[˜ÙHY
+Bˆ
+›İÂˆ
+^Z[™›È‘›ÜšÈ[ˆY[]HÛÛ™›XİÈÚ]^\İ[™È›ÜšÈ‚ˆÎœ[‹ÚYYˆœÛİ\˜ÙHÛİ\˜ÙKZYˆ˜ÚXÚÜÚ[
+˜ÚXÚÜÚ[Ü[ÛœÊ_JJJBˆ
+]Ü[‚ˆ
+˜\ÙKØ˜XÚÙ[™XØ[
+˜\ÙKÜ[[YKX˜XÚÙ[™[[YJBˆ˜Ü™X]K\[‚ˆ›ÜÜÙY
+WBˆ
+ÛÜKXÚXÚÜÚ[ËX™Y›Ü™HH[[YBˆÛİ\˜ÙKZYˆYˆ
+˜ÚXÚÜÚ[Ü[ÛœÊJBˆ
+^Xİ]K\[ˆH[[YBˆ[‚ˆÛÜšÂˆ›ÜšË[Ü[ÛœÊJJJJJJB‚ŠY›ˆÛÛ[X[™\[‚ˆÜ[[YH™Y™\™[˜ÙHÛÛ[X[™Ü[Ûœ×Bˆ
+ÛÛ™ˆ
+HÛÛ[X[™˜Ø[˜Ù[
+H
+Ø[˜Ù[\[ˆ[[YH™Y™\™[˜ÙHÜ[ÛœÊBˆ
+HÛÛ[X[™œ™\İ[YJH
+™\İ[YK\[ˆ[[YH™Y™\™[˜ÙHÜ[ÛœÊBˆ
+HÛÛ[X[™™›ÜšÊH
+›ÜšË\[ˆ[[YH™Y™\™[˜ÙHÜ[ÛœÊBˆ™[ÙBˆ
+›İÂˆ
+^Z[™›È•ÛÜšÈ[[YHÛÛ[X[™\È›İİ\ÜY‚ˆÎ˜ÛÛ[X[™ÛÛ[X[™JJJJB‚Š^[™]\HİÛÜšËœ[[YK˜˜\ÙKÔ[[YH›İØÛÛÒUÛÜšÔ[[YBˆ
+\İ\Ü[[YHÛÜšÈ[œ]Ü[Ûœ×Bˆ
+İ\\[ˆ[[YHÛÜšÈ[œ]Ü[ÛœÊJBˆ
+\]Y\HÜ[[YH™Y™\™[˜ÙHÜ[Ûœ×Bˆ
+]Y\K\[ˆ[[YH™Y™\™[˜ÙHÜ[ÛœÊJBˆ
+XÛÛ[X[™Ü[[YH™Y™\™[˜ÙHÛÛ[X[™Ü[Ûœ×Bˆ
+ÛÛ[X[™\[ˆ[[YH™Y™\™[˜ÙHÛÛ[X[™Ü[ÛœÊJJB‚

@@ -4,6 +4,7 @@
   (:require [std.lib.task.protocol :as protocol
              :refer [task-type task-name task-config]]
             [std.lib.task.process :as process]
+            [std.work.protocol :as work]
             [std.foundation.string :as string]
             [std.foundation.edn :as edn]))
 
@@ -42,6 +43,23 @@
      :result (field task :result)
      :summary (field task :summary)
      :params (field task :params)}))
+
+;; Existing tasks are checkpointed leaves when used as work values. The task
+;; invocation contract remains unchanged; std.work supplies the execution
+;; context and the task pipeline still owns selection, bulk processing, and
+;; reporting.
+(extend-type Task work/IWork
+  (work-spec [task]
+    {:op :step
+     :id (symbol (protocol/task-name task))
+     :task/type (protocol/task-type task)
+     :fn (fn [input context]
+           (process/invoke
+            task
+            input
+            (or (:params context)
+                (get-in context [:work/options :params])
+                {})))}))
 
 (defn task-status
   [task]

@@ -1,0 +1,59 @@
+(ns std.work.runtime
+  (:require [std.work.runtime.base :as base]
+            [std.work.runtime.backend :as backend]
+            [std.work.runtime.frame :as frame]
+            [std.work.runtime.handler :as handler]
+            [std.work.runtime.lifecycle :as lifecycle]))
+
+(def work-value base/work-value)
+(def work-spec-map base/work-spec-map)
+(def work-reference base/work-reference)
+(def reference-id base/reference-id)
+(def observer base/observer)
+(def recording-observer base/recording-observer)
+(def observer-events base/observer-events)
+(def memory-backend backend/memory-backend)
+(def checkpoint-key frame/checkpoint-key)
+(def manifest-values frame/manifest-values)
+(def register-work lifecycle/register-work)
+
+(defn runtime
+  [mode options]
+  (let [options (or options {})
+        handlers (merge handler/default-handlers
+                        (or (:handlers options) {}))]
+    (std.work.runtime.base/Runtime
+     mode
+     (or (:backend options) (backend/memory-backend))
+     handlers
+     (:observer options)
+     (atom {})
+     (or (:runtime-version options) 1)
+     (or (:schema-version options) 1))))
+
+(defn local-runtime
+  ([]
+   (local-runtime {}))
+  ([options]
+   (runtime :local options)))
+
+(defn durable-runtime
+  ([]
+   (durable-runtime {}))
+  ([options]
+   (runtime :durable options)))
+
+(defn with-handler
+  [runtime operation handler]
+  (std.work.runtime.base/Runtime
+   (base/runtime-mode runtime)
+   (base/runtime-backend runtime)
+   (assoc (base/runtime-handlers runtime) operation handler)
+   (base/runtime-observer runtime)
+   (base/runtime-definitions runtime)
+   (base/runtime-code-version runtime)
+   (base/runtime-schema-version runtime)))
+
+(defn handler-operations
+  [runtime]
+  (vec (keys (base/runtime-handlers runtime))))
