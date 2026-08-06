@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
+
+collect_root() {
+    local root="$1"
+    if [ -d "$root" ]; then
+        find "$root" -name '*.hal' \
+            ! -path 'core/lib/test/std/lib/test.hal' \
+            -print
+    fi
+}
 
 collect_files() {
     if [ "$#" -eq 0 ]; then
-        find lib/test -name '*.hal' \
-            ! -path 'lib/test/std/lib/test.hal' \
-            -print | sort
+        collect_root core/lib/test
+        collect_root core/lib/test-lang
         return
     fi
 
@@ -16,19 +24,20 @@ collect_files() {
     for target in "$@"; do
         if [ -d "$target" ]; then
             find "$target" -name '*.hal' \
-                ! -path 'lib/test/std/lib/test.hal'
+                ! -path 'core/lib/test/std/lib/test.hal' \
+                -print
         elif [ -f "$target" ]; then
-            if [ "$target" != 'lib/test/std/lib/test.hal' ]; then
+            if [ "$target" != 'core/lib/test/std/lib/test.hal' ]; then
                 printf '%s\n' "$target"
             fi
         else
             echo "Test target not found: $target" >&2
             return 2
         fi
-    done | sort -u
+    done
 }
 
-mapfile -t TEST_FILES < <(collect_files "$@")
+mapfile -t TEST_FILES < <(collect_files "$@" | sort -u)
 
 if [ "${#TEST_FILES[@]}" -eq 0 ]; then
     echo "No library test files selected" >&2
