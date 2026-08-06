@@ -1,0 +1,374 @@
+#!/usr/bin/env python3
+"""Atomically rename Hara's tahto.* compiler namespaces to lang.*.
+
+This script is intentionally a hard cut. It does not create forwarding
+namespaces and it does not rename serialized :tahto/* data vocabulary.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+
+REPOSITORY = Path(__file__).resolve().parents[2]
+
+TREE_MOVES = (
+    (Path("core/lib/src/tahto"), Path("core/lib/src/lang")),
+    (Path("core/lib/test/tahto"), Path("core/lib/test/lang")),
+)
+
+EXACT_FILE_MOVES = (
+    (Path("core/lib/tahto-port.edn"), Path("core/lib/lang-port.edn")),
+    (
+        Path(".github/workflows/tahto-runtime.yml"),
+        Path(".github/workflows/lang-runtime.yml"),
+    ),
+)
+
+GLOB_FILE_MOVES = (
+    (Path("core/spec"), "tahto-*.edn", "tahto-", "lang-"),
+)
+
+PATH_REPLACEMENTS = (
+    ("core/lib/src/tahto", "core/lib/src/lang"),
+    ("core/lib/test/tahto", "core/lib/test/lang"),
+    ("core/rust/hal-src/tahto", "core/rust/hal-src/lang"),
+    ("lib/src/tahto", "lib/src/lang"),
+    ("lib/test/tahto", "lib/test/lang"),
+    ("rust/hal-src/tahto", "rust/hal-src/lang"),
+    ("tahto-runtime.yml", "lang-runtime.yml"),
+    ("tahto-port.edn", "lang-port.edn"),
+    ("tahto-runtime-parity.edn", "lang-runtime-parity.edn"),
+    ("tahto-hara-parity.edn", "lang-hara-parity.edn"),
+    ("tahto-typescript-parity.edn", "lang-typescript-parity.edn"),
+)
+
+SKIP_DIRECTORIES = {
+    ".git",
+    ".gradle",
+    ".idea",
+    ".next",
+    ".netlify",
+    ".turbo",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "target",
+    "vendor",
+}
+
+PRESERVE_TEXT_FILES = {
+    Path("plans/lang-namespace-migration.md"),
+}
+
+BINARY_SUFFIXES = {
+    ".7z",
+    ".a",
+    ".avif",
+    ".bin",
+    ".class",
+    ".dll",
+    ".dylib",
+    ".gif",
+    ".gz",
+    ".ico",
+    ".jar",
+    ".jpeg",
+    ".jpg",
+    ".lockb",
+    ".o",
+    ".pdf",
+    ".png",
+    ".so",
+    ".tar",
+    ".ttf",
+    ".wasm",
+    ".webp",
+    ".woff",
+    ".woff2",
+    ".zip",
+}
+
+NAMESPACE_PATTERN = re.compile(r"(?<![:/A-Za-z0-9_-])tahto\.")
+
+
+def run(*arguments: str) -> None:
+    print("+", " ".join(arguments))
+    subprocess.run(arguments, cwd=REPOSITORY, check=True)
+
+
+def move_path(source: Path, target: Path) -> None:
+    absolute_source = REPOSITORY / source
+    absolute_target = REPOSITORY / target
+    if absolute_source.exists() and absolute_target.exists():
+        raise RuntimeError(f"both migration paths exist: {source} and {target}")
+    if absolute_target.exists():
+        return
+    if not absolute_source.exists():
+        raise RuntimeError(f"migration source is missing: {source}")
+    absolute_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(absolute_source), str(absolute_target))
+    print(f"moved {source} -> {target}")
+
+
+def move_operational_files() -> None:
+    for source, target in EXACT_FILE_MOVES:
+        source_path = REPOSITORY / source
+        target_path = REPOSITORY / target
+        if source_path.exists() and target_path.exists():
+            raise RuntimeError(f"both operational files exist: {source} and {target}")
+        if source_path.exists():
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.rename(target_path)
+            print(f"renamed {source} -> {target}")
+
+    for relative_root, pattern, old, new in GLOB_FILE_MOVES:
+        root = REPOSITORY / relative_root
+        if not root.is_dir():
+            continue
+        for source_path in sorted(root.glob(pattern)):
+            target_path = source_path.with_name(source_path.name.replace(old, new, 1))
+            if target_path.exists():
+                raise RuntimeError(f"operational rename target exists: {target_path}")
+            source_path.rename(target_path)
+            print(
+                f"renamed {source_path.relative_to(REPOSITORY)} -> "
+                f"{target_path.relative_to(REPOSITORY)}"
+            )
+
+
+def rename_java_tahto_tests() -> None:
+    root = REPOSITORY / "core" / "java" / "src" / "test" / "java"
+    if not root.is_dir():
+        return
+    for source_path in sorted(root.rglob("*Tahto*.java")):
+        target_path = source_path.with_name(source_path.name.replace("Tahto", "Lang"))
+        if target_path.exists():
+            raise RuntimeError(f"Java test rename target exists: {target_path}")
+        source = source_path.read_text(encoding="utf-8")
+        source = source.replace("Tahto", "Lang")
+        target_path.write_text(source, encoding="utf-8")
+        source_path.unlink()
+        print(
+            f"renamed {source_path.relative_to(REPOSITORY)} -> "
+            f"{target_path.relative_to(REPOSITORY)}"
+        )
+
+
+def candidate_text_file(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    relative = path.relative_to(REPOSITORY)
+    if relative in PRESERVE_TEXT_FILES:
+        return False
+    if any(part in SKIP_DIRECTORIES for part in relative.parts):
+        return False
+    if path.suffix.lower() in BINARY_SUFFIXES:
+        return False
+    return True
+
+
+def rewrite_text(path: Path) -> bool:
+    try:
+        original = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return False
+
+    updated = original
+    for old, new in PATH_REPLACEMENTS:
+        updated = updated.replace(old, new)
+
+    # Code namespaces, qualified Vars, quoted registry symbols, dynamic
+    # requiring-resolve targets, and generated-source expectations all use the
+    # same dotted prefix. :tahto/* data keywords are unaffected by this match.
+    updated = NAMESPACE_PATTERN.sub("lang.", updated)
+    updated = updated.replace("(defproject tahto", "(defproject lang")
+    updated = updated.replace("HaraTahto", "HaraLang")
+
+    # Hara-owned workflow and migration labels. Do not globally replace prose
+    # uses of the historical proper name.
+    relative = path.relative_to(REPOSITORY)
+    if relative == Path(".github/workflows/lang-runtime.yml"):
+        updated = updated.replace("Tahto", "Lang")
+        updated = updated.replace("tahto-runtime", "lang-runtime")
+    if relative == Path("core/lib/lang-port.edn"):
+        updated = updated.replace(
+            ":migration/id :foundation-base/tahto-to-hara",
+            ":migration/id :foundation-base/lang-to-hara",
+        )
+
+    if updated == original:
+        return False
+    path.write_text(updated, encoding="utf-8")
+    return True
+
+
+def rewrite_repository() -> int:
+    changed = 0
+    for path in sorted(REPOSITORY.rglob("*")):
+        if candidate_text_file(path) and rewrite_text(path):
+            changed += 1
+    print(f"rewrote {changed} text files")
+    return changed
+
+
+def update_layout_guard() -> None:
+    path = REPOSITORY / "packaging" / "scripts" / "check-language-source-layout"
+    source = path.read_text(encoding="utf-8")
+    if 'Path("core/lib/src/lang"): "lang"' not in source:
+        source = source.replace(
+            "LANGUAGE_ROOTS = {\n",
+            "LANGUAGE_ROOTS = {\n"
+            '    Path("core/lib/src/lang"): "lang",\n'
+            '    Path("core/lib/test/lang"): "lang",\n',
+        )
+    if 'Path("core/lib/src/tahto")' not in source:
+        source = source.replace(
+            "LEGACY_ROOTS = (\n",
+            "LEGACY_ROOTS = (\n"
+            '    Path("core/lib/src/tahto"),\n'
+            '    Path("core/lib/test/tahto"),\n',
+        )
+    path.write_text(source, encoding="utf-8")
+
+
+def write_namespace_guard() -> None:
+    path = REPOSITORY / "packaging" / "scripts" / "check-no-tahto-namespaces"
+    path.write_text(
+        '''#!/usr/bin/env python3
+"""Reject live legacy dotted compiler namespace references."""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+REPOSITORY = Path(__file__).resolve().parents[2]
+CODE_ROOTS = (
+    Path("core/lib"),
+    Path("core/java"),
+    Path("core/rust"),
+    Path("packaging/scripts"),
+    Path(".github/workflows"),
+)
+SKIP = {"target", "node_modules", "vendor", ".git"}
+BINARY = {".class", ".jar", ".wasm", ".png", ".jpg", ".gif", ".zip", ".gz"}
+PATTERN = re.compile(r"(?<![:/A-Za-z0-9_-])tahto\\.")
+
+errors = []
+for relative_root in CODE_ROOTS:
+    root = REPOSITORY / relative_root
+    if not root.exists():
+        continue
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() in BINARY:
+            continue
+        relative = path.relative_to(REPOSITORY)
+        if any(part in SKIP for part in relative.parts):
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for match in PATTERN.finditer(source):
+            line = source.count("\\n", 0, match.start()) + 1
+            errors.append(f"legacy dotted namespace reference: {relative}:{line}")
+
+for legacy in (Path("core/lib/src/tahto"), Path("core/lib/test/tahto")):
+    if (REPOSITORY / legacy).exists():
+        errors.append(f"legacy namespace tree still exists: {legacy}")
+
+for required in (Path("core/lib/src/lang"), Path("core/lib/test/lang")):
+    if not (REPOSITORY / required).is_dir():
+        errors.append(f"required lang namespace tree is missing: {required}")
+
+if errors:
+    for error in errors:
+        print(error, file=sys.stderr)
+    raise SystemExit(1)
+
+print("no live legacy dotted compiler namespaces remain")
+''',
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def update_layout_workflow() -> None:
+    path = REPOSITORY / ".github" / "workflows" / "language-source-layout.yml"
+    source = path.read_text(encoding="utf-8")
+    path_filter = "      - 'packaging/scripts/check-no-tahto-namespaces'\n"
+    if path_filter not in source:
+        source = source.replace(
+            "      - 'packaging/scripts/check-language-source-layout'\n",
+            "      - 'packaging/scripts/check-language-source-layout'\n"
+            + path_filter,
+        )
+    marker = (
+        "      - name: Validate source roots, namespaces, and duplicates\n"
+        "        run: python3 packaging/scripts/check-language-source-layout\n"
+    )
+    addition = marker + (
+        "      - name: Reject legacy compiler code namespaces\n"
+        "        run: python3 packaging/scripts/check-no-tahto-namespaces\n"
+    )
+    if "run: python3 packaging/scripts/check-no-tahto-namespaces" not in source:
+        if marker not in source:
+            raise RuntimeError("language source layout workflow marker is missing")
+        source = source.replace(marker, addition)
+    path.write_text(source, encoding="utf-8")
+
+
+def update_project_name() -> None:
+    path = REPOSITORY / "core" / "lib" / "project.hal"
+    source = path.read_text(encoding="utf-8")
+    source = source.replace("(defproject tahto", "(defproject lang")
+    path.write_text(source, encoding="utf-8")
+
+
+def validate() -> None:
+    run("python3", "packaging/scripts/sync-rust-hal-src")
+    run("python3", "packaging/scripts/check-language-source-layout")
+    run("python3", "packaging/scripts/check-no-tahto-namespaces")
+    run("python3", "packaging/scripts/sync-rust-hal-src", "--check")
+    run("git", "diff", "--check")
+
+
+def migrate(validate_changes: bool) -> None:
+    for source, target in TREE_MOVES:
+        move_path(source, target)
+    move_operational_files()
+    rename_java_tahto_tests()
+    rewrite_repository()
+    update_project_name()
+    # These files intentionally contain the legacy spelling in guard patterns
+    # and are written only after the repository-wide replacement pass.
+    update_layout_guard()
+    write_namespace_guard()
+    update_layout_workflow()
+    if validate_changes:
+        validate()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="perform the migration without running repository checks",
+    )
+    arguments = parser.parse_args()
+    os.chdir(REPOSITORY)
+    migrate(validate_changes=not arguments.no_validate)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
