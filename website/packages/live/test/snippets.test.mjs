@@ -30,10 +30,17 @@ test("required demo snippets are present", () => {
     "expected at least one canvas snippet");
 });
 
+test("console snippets leave results to the live output surface", () => {
+  for (const snippet of LIVE_SNIPPETS.filter((entry) => entry.kind === "console")) {
+    assert.doesNotMatch(snippet.source, /^\s*;\s*=>/m,
+      `${snippet.id}: expected-result comments duplicate the live output`);
+  }
+});
+
 test("canvas snippets follow the docs canvas-stage contract", () => {
   for (const snippet of LIVE_SNIPPETS.filter((entry) => entry.kind === "canvas")) {
     assert.ok(snippet.source.includes("(require [studio.draw :as draw])"),
-      `${snippet.id}: missing independently evaluable studio.draw require`);
+      `${snippet.id}: missing locally evaluable studio.draw require`);
     assert.ok(snippet.source.includes('"canvas/background"'),
       `${snippet.id}: must render to the canvas/background canvas id`);
     assert.ok(snippet.source.includes("(node/start"),

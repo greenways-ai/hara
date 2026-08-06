@@ -45,20 +45,32 @@ test("leads with the language and renders benchmark evidence from committed data
   assert.doesNotMatch(page, /One language\.[\s\S]*Fit to its environment\./);
 });
 
-test("keeps the three runtime modes after the learning path", async () => {
+test("keeps the three runtime modes as accessible tabs after the learning path", async () => {
   const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
+  const homeStyles = await readFile(new URL("../src/styles/home-interactions.css", import.meta.url), "utf8");
   const repl = await readFile(new URL("../public/assets/docs-repl.js", import.meta.url), "utf8");
   const liveKernel = await readFile(new URL("../packages/live/src/kernel.js", import.meta.url), "utf8");
   const prepare = await readFile(new URL("../scripts/prepare-docs.mjs", import.meta.url), "utf8");
   assert.match(page, /class="kernel-mode-tabs" role="tablist"/);
-  assert.equal((page.match(/role="tab" data-kernel-tab=/g) ?? []).length, 3);
   assert.match(page, /data-kernel-tab="java"[\s\S]*data-kernel-tab="native"[\s\S]*data-kernel-tab="web"/);
+  assert.match(page, /role="tabpanel"[\s\S]*data-kernel-mode="java"/);
   assert.doesNotMatch(page, /<select id="kernel-mode"/);
+  assert.match(page, /Java[\s\S]*Native[\s\S]*Web/);
+  assert.match(page, /@hara-lang\/live\/style\.css[\s\S]*home-interactions\.css/);
+  assert.match(homeStyles, /\.kernel-mode-tabs/);
+  assert.match(homeStyles, /\.kernel-mode-tab\[aria-selected="true"\]/);
   assert.doesNotMatch(page, /compressed browser VM/);
   assert.match(repl, /\/docs-assets\/live\/kernel\.js/);
   assert.match(liveKernel, /manifest\.variants\.core\.url/);
   assert.match(repl, /data-hara-eval/);
   assert.match(prepare, /clojure\$1/);
+});
+
+test("puts homepage demo tabs above controls and hides the redundant kernel toast", async () => {
+  const styles = await readFile(new URL("../src/styles/home-interactions.css", import.meta.url), "utf8");
+  assert.match(styles, /\.hara-live-card-tabs[\s\S]*order:\s*-1/);
+  assert.match(styles, /\.hara-live-card-toast[\s\S]*display:\s*none\s*!important/);
+  assert.match(styles, /\.hara-live-card-tabs button\[aria-selected="true"\]::after/);
 });
 
 test("orders the embedded docs around a first learning journey", async () => {

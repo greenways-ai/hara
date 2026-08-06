@@ -1,0 +1,18 @@
+(ns std.work.protocol)
+
+;; Work values describe portable logical structure. They do not choose a
+;; scheduler, storage engine, queue, or recovery policy.
+(defprotocol IWork
+  (work-spec [work]))
+
+;; Runtimes own execution and lifecycle. The three operations keep the public
+;; extension surface small while allowing local and durable implementations.
+(defprotocol IWorkRuntime
+  (-start [runtime work input options])
+  (-query [runtime reference options])
+  (-command [runtime reference command options]))
+
+;; Observers receive operational events after the runtime records them. They
+;; are deliberately not the durable source of truth.
+(defprotocol IWorkObserver
+  (work-event [observer event]))

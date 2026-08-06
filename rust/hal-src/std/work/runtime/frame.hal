@@ -1,0 +1,166 @@
+(ns std.work.runtime.frame
+  (:require [std.work.protocol :as protocol]
+            [std.work.runtime.base :as base]))
+
+(defn node-id
+  ([spec]
+   (node-id spec (:op spec)))
+  ([spec fallback]
+   (or (:id spec) fallback)))
+
+(defn child-frame
+  ([frame relation child-spec]
+   (assoc frame
+          :node/path
+          (conj (conj (:node/path frame) relation)
+                (node-id child-spec))))
+  ([frame relation slot child-spec]
+   (assoc frame
+          :node/path
+          (conj
+           (conj (conj (:node/path frame) relation) slot)
+           (node-id child-spec)))))
+
+(defn item-frame
+  [frame item-id]
+  (let [path (conj (vec (or (:item/path frame) [])) item-id)]
+    (assoc frame
+           :item/path path
+           :item/id (if (= 1 (count path))
+                      item-id
+                      path))))
+
+(defn leaf-frame
+  [frame spec]
+  (if (empty? (:node/path frame))
+    (assoc frame :node/path [(:op spec) (node-id spec)])
+    frame))
+
+(defn checkpoint-key
+  [frame]
+  [(:run/id frame)
+   (:work/root frame)
+   (:node/path frame)
+   (:item/id frame)])
+
+(defn leaf-context
+  [frame]
+  (merge (or (:context frame) {})
+         {:run/id (:run/id frame)
+          :work/root (:work/root frame)
+          :work/version (:work/version frame)
+          :node/path (:node/path frame)
+          :item/id (:item/id frame)
+          :item/path (or (:item/path frame) [])
+          :work/options (:options frame)}))
+
+(defn emit!
+  [runtime frame event data]
+  (let [record
+        (merge {:event event
+                :run/id (:run/id frame)
+                :work/root (:work/root frame)
+                :node/path (:node/path frame)
+                :item/id (:item/id frame)}
+               (or data {}))
+        stored (base/backend-call (base/runtime-backend runtime) :append-event record)
+        observer (base/runtime-observer runtime)]
+    (if observer
+      (try
+        (protocol/work-event observer stored)
+        (catch Throwable error nil)))
+    stored))
+
+(defn cancelled?
+  [runtime frame]
+  (= :cancelled
+     (:run/status
+      (base/backend-call (base/runtime-backend runtime) :load-run (:run/id frame)))))
+
+(defn assert-running!
+  [runtime frame]
+  (if (cancelled? runtime frame)
+    (throw
+     (ex-info "Work run has been cancelled" {:run/id (:run/id frame)}))))
+
+
+(defn explicit-item?
+  [item]
+  (and (map? item)
+       (not (nil? (:item/id item)))
+       (has? item :item/value)))
+
+(defn asserted-item
+  [id value item index]
+  (if (nil? id)
+    (throw
+     (ex-info "Work item identity cannot be nil"
+              {:item item
+               :index index}))
+    {:item/id id
+     :item/value value}))
+
+(defn normalise-item
+  [runtime options item index]
+  (cond
+    (explicit-item? item)
+    (asserted-item (:item/id item)
+                   (:item/value item)
+                   item
+                   index)
+
+    (:item-key options)
+    (asserted-item ((:item-key options) item)
+                   item
+                   item
+                   index)
+
+    (not (base/durable? runtime))
+    {:item/id index
+     :item/value item}
+
+    :else
+    (throw
+     (ex-info
+      "Durable collection work requires :item/id or an :item-key function"
+      {:item item
+       :index index}))))
+
+(defn manifest-contains-id?
+  [manifest item-id]
+  (reduce
+   (fn [found item]
+     (or found (= item-id (:item/id item))))
+   false
+   manifest))
+
+(defn normalise-manifest
+  [runtime options values]
+  (let [values (vec values)]
+    (loop [index 0
+           output []]
+      (if (= index (count values))
+        output
+        (let [item
+              (normalise-item runtime
+                              options
+                              (nth values index)
+                              index)]
+          (if (manifest-contains-id? output (:item/id item))
+            (throw
+             (ex-info "Work manifest contains duplicate :item/id"
+                      {:item/id (:item/id item)
+                       :index index}))
+            (recur (inc index)
+                   (conj output item))))))))
+
+(defn manifest-values
+  [manifest]
+  (vec (map (fn [item] (:item/value item)) manifest)))
+
+;; ---------------------------------------------------------------------------
+;; Node handlers
+;;
+;; A handler receives the recursive execute function first. Optional
+;; capabilities can therefore add new operations without adding protocols.
+;; ---------------------------------------------------------------------------

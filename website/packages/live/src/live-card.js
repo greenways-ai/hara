@@ -71,6 +71,33 @@ export async function waitForCanvasFirstFrame(rendered, task) {
   ]);
 }
 
+/** Cancel an in-flight HTA evaluation without destroying the shared kernel. */
+export function cancelEvaluation(task) {
+  if (typeof task?.cancel !== "function") return false;
+  try {
+    return task.cancel() !== false;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Run after a textarea's click/default action has committed its new caret.
+ * Mobile browsers may expose the previous selection during pointerup.
+ */
+export function afterCaretPlacement(callback, {
+  requestFrame = globalThis.requestAnimationFrame?.bind(globalThis),
+  setTimer = globalThis.setTimeout?.bind(globalThis)
+} = {}) {
+  let cancelled = false;
+  const run = () => {
+    if (!cancelled) callback();
+  };
+  if (typeof requestFrame === "function") requestFrame(run);
+  else setTimer?.(run, 0);
+  return () => { cancelled = true; };
+}
+
 const CONNECTION_TEXT = {
   idle: "Idle",
   loading: "Connecting",
@@ -195,7 +222,7 @@ const localPointer = (event, canvas) => {
  * Live canvas stage, generalized from the docs REPL canvas controller
  * (website/public/assets/docs-repl.js `createCanvasController`).
  */
-function createCanvasController(card, { runtimeBase }) {
+function createCanvasController(card, { runtimeBase, onRunningChange = () => {} }) {
   const canvas = document.createElement("canvas");
   canvas.className = "hara-live-card-canvas";
   canvas.width = 960;
@@ -220,12 +247,23 @@ function createCanvasController(card, { runtimeBase }) {
   let compileAnonymousDocument = null;
   let unregisterCanvas = null;
   let generation = 0;
+  let stagedNode = null;
   let activeNode = null;
+  let activeTask = null;
   let closed = false;
 
   const setStatus = (text, state = "") => {
     status.textContent = text;
     status.dataset.state = state;
+  };
+
+  const clearSurface = () => {
+    const context = canvas.getContext?.("2d");
+    if (!context) return;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#02050b";
+    context.fillRect(0, 0, canvas.width, canvas.height);
   };
 
   const canvasResizer = createVerticalResizer(panel, {
@@ -259,10 +297,28 @@ function createCanvasController(card, { runtimeBase }) {
     });
   }
 
+  const interrupt = ({ clear = true, statusText = "Stopped" } = {}) => {
+    if (closed) return false;
+    generation += 1;
+    const nodes = [...new Set([stagedNode, activeNode].filter(Boolean))];
+    stagedNode = null;
+    activeNode = null;
+    for (const nodeId of nodes) runtime?.release(nodeId, canvasId);
+    const task = activeTask;
+    activeTask = null;
+    const cancelled = cancelEvaluation(task);
+    if (clear) clearSurface();
+    if (statusText !== null) setStatus(statusText, "idle");
+    onRunningChange(false);
+    return cancelled || nodes.length > 0;
+  };
+
   const evaluate = async (session, source) => {
     if (closed) throw new Error("canvas stage is closed");
+    interrupt({ clear: false, statusText: null });
     const currentGeneration = ++generation;
     const nodeId = `live-card-${currentGeneration}`;
+    stagedNode = nodeId;
     setStatus("Starting canvas", "loading");
     await ensureRuntime(session);
     runtime.stage(nodeId, canvasId);
@@ -277,33 +333,63 @@ function createCanvasController(card, { runtimeBase }) {
       }
       const rendered = runtime.waitForFirstRender(nodeId, canvasId, 8000);
       const task = session.evalRaw(`(studio.node/run-task ${JSON.stringify(taskId)})`);
-      task.catch((error) => setStatus(errorMessage(error), "error"));
+      activeTask = task;
+      task.then(
+        () => {
+          if (task !== activeTask || currentGeneration !== generation) return;
+          activeTask = null;
+          runtime.release(nodeId, canvasId);
+          if (activeNode === nodeId) activeNode = null;
+          if (stagedNode === nodeId) stagedNode = null;
+          setStatus("Stopped", "idle");
+          onRunningChange(false);
+        },
+        (error) => {
+          if (task !== activeTask || currentGeneration !== generation) return;
+          activeTask = null;
+          runtime.release(nodeId, canvasId);
+          if (activeNode === nodeId) activeNode = null;
+          if (stagedNode === nodeId) stagedNode = null;
+          setStatus(errorMessage(error), "error");
+          onRunningChange(false);
+        }
+      );
       await waitForCanvasFirstFrame(rendered, task);
       if (currentGeneration !== generation) {
-        runtime.discard(nodeId, canvasId);
-        return { value: null, label: "Canvas superseded" };
+        runtime.release(nodeId, canvasId);
+        return { value: null, label: "Canvas interrupted" };
       }
       runtime.commit(nodeId, canvasId);
+      stagedNode = null;
       activeNode = nodeId;
-      setStatus("Live · first frame rendered", "ready");
+      setStatus("Live · Stop or Esc to interrupt", "ready");
+      onRunningChange(true);
       return { value: null, label: "Canvas live" };
     } catch (error) {
-      runtime.discard(nodeId, canvasId);
+      runtime.release(nodeId, canvasId);
+      if (currentGeneration !== generation) {
+        return { value: null, label: "Canvas interrupted" };
+      }
+      stagedNode = null;
+      activeNode = null;
+      if (activeTask && currentGeneration === generation) activeTask = null;
       setStatus(errorMessage(error), "error");
+      onRunningChange(false);
       throw error;
     }
   };
 
   return {
     evaluate,
+    interrupt,
+    isRunning: () => Boolean(activeTask || stagedNode || activeNode),
     setStatus,
     show() { panel.hidden = false; },
     hide() { panel.hidden = true; },
     close() {
       if (closed) return;
+      interrupt({ clear: false, statusText: null });
       closed = true;
-      generation += 1;
-      if (activeNode) runtime?.release(activeNode, canvasId);
       unregisterCanvas?.();
       runtime?.close();
       canvasResizer.destroy();
@@ -353,7 +439,7 @@ function formAtEditor(editor, preferLine = false) {
  * @param {Function | null} [options.createKernel] passed to createLiveKernel
  * @param {Function | null} [options.fetchAsset] passed to createLiveKernel
  * @param {string} [options.playgroundUrl] target of the "Open in Playground" link
- * @returns {{ destroy: () => void, eval: () => Promise<void>, run: () => Promise<void> }}
+ * @returns {{ destroy: () => void, eval: () => Promise<void>, run: () => Promise<void>, interrupt: () => boolean, reset: () => void }}
  */
 export function mountLiveCard(root, {
   snippets = LIVE_SNIPPETS,
@@ -378,6 +464,7 @@ export function mountLiveCard(root, {
       </span>
       <button type="button" class="hara-live-card-eval" data-live-eval>Eval</button>
       <button type="button" class="hara-live-card-run" data-live-run>Run</button>
+      <button type="button" class="hara-live-card-eval hara-live-card-reset" data-live-reset hidden>Reset</button>
       <div class="hara-live-card-tabs" role="tablist" aria-label="Examples"></div>
       <a class="hara-live-card-playground" target="_blank" rel="noopener">Open in Playground</a>
     </header>
@@ -396,15 +483,31 @@ export function mountLiveCard(root, {
   const editor = card.querySelector("textarea");
   const evalButton = card.querySelector("[data-live-eval]");
   const runButton = card.querySelector("[data-live-run]");
+  const resetButton = card.querySelector("[data-live-reset]");
   const output = card.querySelector(".hara-live-card-output");
   const connectionLabel = card.querySelector("[data-live-connection-label]");
   playgroundLink.href = playgroundUrl;
 
-  const toast = createCardToast(card);
-  const canvas = createCanvasController(card, { runtimeBase });
-
   const byId = new Map(snippets.map((snippet) => [snippet.id, snippet]));
   let active = byId.get(activeSnippet) ?? snippets[0] ?? null;
+  let canvasRunning = false;
+
+  const updateCanvasControls = (running) => {
+    canvasRunning = Boolean(running);
+    card.dataset.canvasRunning = String(canvasRunning);
+    runButton.textContent = canvasRunning ? "Stop" : "Run";
+    runButton.setAttribute("aria-label", canvasRunning ? "Interrupt running canvas" : "Run example");
+    runButton.classList.toggle("hara-live-card-run", !canvasRunning);
+    runButton.classList.toggle("hara-live-card-eval", canvasRunning);
+    resetButton.hidden = active?.kind !== "canvas" && !canvasRunning;
+  };
+
+  const toast = createCardToast(card);
+  const canvas = createCanvasController(card, {
+    runtimeBase,
+    onRunningChange: updateCanvasControls
+  });
+
   const sessionId = `live-${Math.random().toString(36).slice(2)}`;
   let kernelPromise = kernel ? Promise.resolve(kernel) : null;
   let sessionPromise = null;
@@ -412,6 +515,8 @@ export function mountLiveCard(root, {
   let operation = 0;
   let destroyed = false;
   let pointerGesture = null;
+  let pendingPointerEvaluation = false;
+  let cancelPendingPointerEvaluation = null;
   let lastPointerEvaluation = 0;
 
   const setConnection = (state, error = null) => {
@@ -425,7 +530,8 @@ export function mountLiveCard(root, {
   const tabButtons = () => [...tabs.querySelectorAll("button")];
   const setControlsDisabled = (disabled) => {
     evalButton.disabled = disabled;
-    runButton.disabled = disabled;
+    runButton.disabled = disabled && !canvasRunning;
+    resetButton.disabled = disabled;
     for (const tab of tabButtons()) tab.disabled = disabled;
   };
 
@@ -489,6 +595,25 @@ export function mountLiveCard(root, {
     output.textContent = "";
     if (active?.kind === "canvas") canvas.show();
     else canvas.hide();
+    updateCanvasControls(canvas.isRunning());
+  };
+
+  const stopCanvas = ({ clear = true, statusText = "Stopped" } = {}) => {
+    operation += 1;
+    const stopped = canvas.interrupt({ clear, statusText });
+    if (sessionPromise) setConnection("ready");
+    setControlsDisabled(false);
+    return stopped;
+  };
+
+  const reset = () => {
+    operation += 1;
+    canvas.interrupt({ clear: true, statusText: active?.kind === "canvas" ? "Waiting to run" : null });
+    evalRange = null;
+    if (active) editor.value = active.source;
+    syncHighlight();
+    syncOutputMode();
+    if (sessionPromise) setConnection("ready");
   };
 
   const selectSnippet = (id, { focus = false } = {}) => {
@@ -496,6 +621,7 @@ export function mountLiveCard(root, {
     if (!next) return;
     if (next !== active) {
       operation += 1;
+      canvas.interrupt({ clear: true, statusText: null });
       active = next;
       evalRange = null;
       editor.value = next.source;
@@ -587,13 +713,14 @@ export function mountLiveCard(root, {
   };
 
   const run = () => evaluate({ source: editor.value, mode: "run", range: null });
+  const runOrStop = () => canvas.isRunning() ? stopCanvas() : run();
 
   // Structural editing and evaluation shortcuts.
   editor.addEventListener("keydown", (event) => {
     const modifier = event.metaKey || event.ctrlKey;
     if (modifier && event.key === "Enter") {
       event.preventDefault();
-      run();
+      runOrStop();
       return;
     }
     if ((event.altKey && event.key === "Enter") ||
@@ -626,6 +753,14 @@ export function mountLiveCard(root, {
     }
   });
 
+  card.addEventListener("keydown", (event) => {
+    const interruptKey = event.key === "Escape" ||
+      (event.ctrlKey && !event.metaKey && event.key === ".");
+    if (!interruptKey || !canvas.isRunning()) return;
+    event.preventDefault();
+    stopCanvas();
+  });
+
   editor.addEventListener("input", () => {
     evalRange = null;
     syncHighlight();
@@ -637,32 +772,50 @@ export function mountLiveCard(root, {
     syncHighlight();
   });
 
-  // InstaREPL interaction: a primary click or tap evaluates the complete form
-  // beginning on that line. Dragging and text selections remain ordinary edits.
+  // InstaREPL interaction: pointerup only records a direct tap. Evaluation is
+  // deferred until click/default handling has committed the new textarea caret.
+  // This avoids evaluating the previous cursor position on Android and iOS.
   editor.addEventListener("pointerdown", (event) => {
     if (!event.isPrimary || (event.pointerType !== "touch" && event.button !== 0)) return;
+    cancelPendingPointerEvaluation?.();
+    cancelPendingPointerEvaluation = null;
+    pendingPointerEvaluation = false;
     pointerGesture = {
       id: event.pointerId,
       x: event.clientX,
-      y: event.clientY,
-      start: editor.selectionStart,
-      end: editor.selectionEnd
+      y: event.clientY
     };
   });
   editor.addEventListener("pointerup", (event) => {
     const gesture = pointerGesture;
     pointerGesture = null;
-    if (!gesture || gesture.id !== event.pointerId || editor.selectionStart !== editor.selectionEnd) return;
+    if (!gesture || gesture.id !== event.pointerId) return;
     if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 8) return;
-    const now = Date.now();
-    if (now - lastPointerEvaluation < 280) return;
-    lastPointerEvaluation = now;
-    setTimeout(() => evalCurrent({ preferLine: true }), 0);
+    pendingPointerEvaluation = true;
   });
-  editor.addEventListener("pointercancel", () => { pointerGesture = null; });
+  editor.addEventListener("click", () => {
+    if (!pendingPointerEvaluation) return;
+    pendingPointerEvaluation = false;
+    cancelPendingPointerEvaluation?.();
+    cancelPendingPointerEvaluation = afterCaretPlacement(() => {
+      cancelPendingPointerEvaluation = null;
+      if (destroyed || editor.selectionStart !== editor.selectionEnd) return;
+      const now = Date.now();
+      if (now - lastPointerEvaluation < 280) return;
+      lastPointerEvaluation = now;
+      evalCurrent({ preferLine: true });
+    });
+  });
+  editor.addEventListener("pointercancel", () => {
+    pointerGesture = null;
+    pendingPointerEvaluation = false;
+    cancelPendingPointerEvaluation?.();
+    cancelPendingPointerEvaluation = null;
+  });
 
   evalButton.addEventListener("click", () => evalCurrent({ preferLine: true }));
-  runButton.addEventListener("click", run);
+  runButton.addEventListener("click", runOrStop);
+  resetButton.addEventListener("click", reset);
 
   if (active) editor.value = active.source;
   selectSnippet(active?.id ?? "");
@@ -672,10 +825,14 @@ export function mountLiveCard(root, {
   return {
     eval: evalCurrent,
     run,
+    interrupt: stopCanvas,
+    reset,
     destroy() {
       if (destroyed) return;
       destroyed = true;
       operation += 1;
+      cancelPendingPointerEvaluation?.();
+      cancelPendingPointerEvaluation = null;
       resizeObserver?.disconnect();
       editorResizer.destroy();
       canvas.close();

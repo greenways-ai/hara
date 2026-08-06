@@ -28,6 +28,9 @@
       id)))
 
 (defn run-task [id]
+  ;; Referring to *active-task* yields the atom itself. Dereference it once to
+  ;; obtain [task-id callback]; a second deref incorrectly treats that vector
+  ;; as a reference and prevents every canvas generation from starting.
   (let [entry (deref *active-task*)]
     (if (= id (nth entry 0))
       ((nth entry 1))

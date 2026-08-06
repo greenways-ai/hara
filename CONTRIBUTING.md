@@ -1,7 +1,7 @@
 # Contributing to Hara
 
 By submitting a contribution, you certify that you have the right to submit it
-and license your contribution under the repository's [EPL-2.0](LICENSE) terms.
+and license your contribution under the repository's [Apache-2.0](LICENSE) terms.
 Do not submit third-party code, assets, or generated material unless its
 provenance and license are compatible and recorded in `LICENSES/README.md`.
 

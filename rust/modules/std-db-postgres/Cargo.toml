@@ -2,7 +2,7 @@
 name = "hara-db-postgres"
 version = "0.1.0"
 edition = "2021"
-license = "EPL-2.0"
+license = "Apache-2.0"
 rust-version = "1.78"
 description = "Optional PostgreSQL native ABI module for Hara and Hestia"
 

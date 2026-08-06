@@ -9,4 +9,4 @@
  :project/artifact-paths ["target/package"]
  :project/archive-root "target/package"
  :project/package {:entry-points ["ledger.noir"]
-                   :license "EPL-2.0"}}
+                   :license "Apache-2.0"}}

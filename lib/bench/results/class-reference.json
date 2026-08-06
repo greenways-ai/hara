@@ -1,0 +1,1605 @@
+{
+  "schema_version": 2,
+  "profile": "class-reference",
+  "corpus": "hara-benchmarks verified run",
+  "environment": {
+    "timestamp": "2026-08-05T00:41:37.598483+00:00",
+    "platform": "Linux-6.17.0-1020-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "git_revision": "3872e1bb792d7d4b65d1fe6c63ba699f184677f4"
+  },
+  "versions": {
+    "bb": "babashka v1.13.219",
+    "c": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "chez": "unavailable",
+    "clojure": "1.12.5",
+    "guile": "guile (GNU Guile) 3.0.9",
+    "java": "openjdk 21.0.11 2026-04-21",
+    "javac": "javac 21.0.11",
+    "luajit": "LuaJIT 2.1.1703358377 -- Copyright (C) 2005-2023 Mike Pall. https://luajit.org/",
+    "node": "Node v24.18.0 / V8 13.6.233.17-node.50",
+    "pypy": "Python 3.9.18 (7.3.15+dfsg-1build3, Apr 01 2024, 03:12:48)",
+    "python": "3.12.3",
+    "ruby": "ruby 4.0.6 (2026-07-14 revision 03b6d3f889) +YJIT +PRISM [x86_64-linux] / YJIT enabled",
+    "rust": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "sbcl": "SBCL 2.2.9.debian"
+  },
+  "workload_ids": [
+    "ackermann-deep",
+    "collatz-range",
+    "heap-permute",
+    "matrix-multiply",
+    "queens-backtracking",
+    "sieve-array",
+    "tak-branching",
+    "towers-recursive"
+  ],
+  "runtime_order": [
+    "bb-prepared",
+    "c-prepared",
+    "chez-prepared",
+    "clojure-prepared",
+    "guile-prepared",
+    "java-prepared",
+    "luajit-prepared",
+    "node-prepared",
+    "pypy-prepared",
+    "python-prepared",
+    "ruby-yjit-prepared",
+    "sbcl-prepared",
+    "hara-rust-whole-wasm-prepared"
+  ],
+  "measurements": [
+    {
+      "runtime": "hara-rust-whole-wasm-prepared",
+      "workload": "sieve-array",
+      "status": "unsupported",
+      "reason": "sieve-array: primitive calls support at most 255 arguments [line 1, column 13]"
+    },
+    {
+      "runtime": "hara-rust-whole-wasm-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 1169403,
+      "prepare_ns": 1858653,
+      "samples_ns": [
+        1131616,
+        1141381,
+        1129363
+      ],
+      "analysis": {
+        "steady_ns": 1131616
+      }
+    },
+    {
+      "runtime": "hara-rust-whole-wasm-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 804253,
+      "prepare_ns": 3040254,
+      "samples_ns": [
+        762460,
+        574556,
+        752435
+      ],
+      "analysis": {
+        "steady_ns": 752435
+      }
+    },
+    {
+      "runtime": "hara-rust-whole-wasm-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 1035752,
+      "prepare_ns": 2541852,
+      "samples_ns": [
+        999337,
+        965175,
+        951695
+      ],
+      "analysis": {
+        "steady_ns": 965175
+      }
+    },
+    {
+      "runtime": "hara-rust-whole-wasm-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 11034317,
+      "prepare_ns": 1899694,
+      "samples_ns": [
+        10684359,
+        10358658,
+        10741895
+      ],
+      "analysis": {
+        "steady_ns": 10684359
+      }
+    },
+    {
+      "runtime": "hara-rust-whole-wasm-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 196526,
+      "prepare_ns": 1939393,
+      "samples_ns": [
+        189927,
+        248655,
+        237869
+      ],
+      "analysis": {
+        "steady_ns": 237869
+      }
+    },
+    {
+      "runtime": "hara-rust-whole-wasm-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 5529787,
+      "prepare_ns": 2309863,
+      "samples_ns": [
+        5997753,
+        5465109,
+        5404459
+      ],
+      "analysis": {
+        "steady_ns": 5465109
+      }
+    },
+    {
+      "runtime": "hara-rust-whole-wasm-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 103426,
+      "prepare_ns": 3212754,
+      "samples_ns": [
+        68363,
+        64598,
+        58208
+      ],
+      "analysis": {
+        "steady_ns": 64598
+      }
+    },
+    {
+      "runtime": "luajit-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 39000,
+      "prepare_ns": 11000,
+      "samples_ns": [
+        22000,
+        14000,
+        3000
+      ],
+      "analysis": {
+        "steady_ns": 14000
+      }
+    },
+    {
+      "runtime": "luajit-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 2042000,
+      "prepare_ns": 6000,
+      "samples_ns": [
+        3228000,
+        4187000,
+        4126000
+      ],
+      "analysis": {
+        "steady_ns": 4126000
+      }
+    },
+    {
+      "runtime": "luajit-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 704000,
+      "prepare_ns": 16000,
+      "samples_ns": [
+        573000,
+        613000,
+        476000
+      ],
+      "analysis": {
+        "steady_ns": 573000
+      }
+    },
+    {
+      "runtime": "luajit-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 1228000,
+      "prepare_ns": 14000,
+      "samples_ns": [
+        1220000,
+        759000,
+        728000
+      ],
+      "analysis": {
+        "steady_ns": 759000
+      }
+    },
+    {
+      "runtime": "luajit-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 6441000,
+      "prepare_ns": 8000,
+      "samples_ns": [
+        17991000,
+        27889000,
+        27859000
+      ],
+      "analysis": {
+        "steady_ns": 27859000
+      }
+    },
+    {
+      "runtime": "luajit-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 589000,
+      "prepare_ns": 7000,
+      "samples_ns": [
+        446000,
+        605000,
+        425000
+      ],
+      "analysis": {
+        "steady_ns": 446000
+      }
+    },
+    {
+      "runtime": "luajit-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 3394000,
+      "prepare_ns": 12000,
+      "samples_ns": [
+        3356000,
+        3291000,
+        3208000
+      ],
+      "analysis": {
+        "steady_ns": 3291000
+      }
+    },
+    {
+      "runtime": "luajit-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 91000,
+      "prepare_ns": 15000,
+      "samples_ns": [
+        23000,
+        21000,
+        39000
+      ],
+      "analysis": {
+        "steady_ns": 23000
+      }
+    },
+    {
+      "runtime": "pypy-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 42935,
+      "prepare_ns": 95003,
+      "samples_ns": [
+        33170,
+        31487,
+        447074
+      ],
+      "analysis": {
+        "steady_ns": 33170
+      }
+    },
+    {
+      "runtime": "pypy-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 14285418,
+      "prepare_ns": 71047,
+      "samples_ns": [
+        8045740,
+        7978799,
+        8083838
+      ],
+      "analysis": {
+        "steady_ns": 8045740
+      }
+    },
+    {
+      "runtime": "pypy-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 39459352,
+      "prepare_ns": 138038,
+      "samples_ns": [
+        9041391,
+        10136663,
+        3398745
+      ],
+      "analysis": {
+        "steady_ns": 9041391
+      }
+    },
+    {
+      "runtime": "pypy-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 15236492,
+      "prepare_ns": 106932,
+      "samples_ns": [
+        2156862,
+        2021097,
+        1957542
+      ],
+      "analysis": {
+        "steady_ns": 2021097
+      }
+    },
+    {
+      "runtime": "pypy-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 142496991,
+      "prepare_ns": 85769,
+      "samples_ns": [
+        118524330,
+        117079914,
+        119943993
+      ],
+      "analysis": {
+        "steady_ns": 118524330
+      }
+    },
+    {
+      "runtime": "pypy-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 41084071,
+      "prepare_ns": 97337,
+      "samples_ns": [
+        9336669,
+        5312150,
+        6277296
+      ],
+      "analysis": {
+        "steady_ns": 6277296
+      }
+    },
+    {
+      "runtime": "pypy-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 3044351,
+      "prepare_ns": 80311,
+      "samples_ns": [
+        1392169,
+        1351708,
+        1362835
+      ],
+      "analysis": {
+        "steady_ns": 1362835
+      }
+    },
+    {
+      "runtime": "pypy-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 9876643,
+      "prepare_ns": 130176,
+      "samples_ns": [
+        1199339,
+        534956,
+        822851
+      ],
+      "analysis": {
+        "steady_ns": 822851
+      }
+    },
+    {
+      "runtime": "node-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 59720,
+      "prepare_ns": 63185,
+      "samples_ns": [
+        15223,
+        11998,
+        12749
+      ],
+      "analysis": {
+        "steady_ns": 12749
+      }
+    },
+    {
+      "runtime": "node-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 1863840,
+      "prepare_ns": 53481,
+      "samples_ns": [
+        1506492,
+        1551239,
+        1526271
+      ],
+      "analysis": {
+        "steady_ns": 1526271
+      }
+    },
+    {
+      "runtime": "node-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 813697,
+      "prepare_ns": 67722,
+      "samples_ns": [
+        2163683,
+        261635,
+        239851
+      ],
+      "analysis": {
+        "steady_ns": 261635
+      }
+    },
+    {
+      "runtime": "node-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 789420,
+      "prepare_ns": 91528,
+      "samples_ns": [
+        2266548,
+        393062,
+        403809
+      ],
+      "analysis": {
+        "steady_ns": 403809
+      }
+    },
+    {
+      "runtime": "node-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 14143237,
+      "prepare_ns": 55053,
+      "samples_ns": [
+        14013220,
+        14030376,
+        14057357
+      ],
+      "analysis": {
+        "steady_ns": 14030376
+      }
+    },
+    {
+      "runtime": "node-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 518122,
+      "prepare_ns": 54271,
+      "samples_ns": [
+        210037,
+        207343,
+        209766
+      ],
+      "analysis": {
+        "steady_ns": 209766
+      }
+    },
+    {
+      "runtime": "node-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 2689326,
+      "prepare_ns": 60922,
+      "samples_ns": [
+        1293600,
+        1318448,
+        1267532
+      ],
+      "analysis": {
+        "steady_ns": 1293600
+      }
+    },
+    {
+      "runtime": "node-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 309627,
+      "prepare_ns": 61563,
+      "samples_ns": [
+        191699,
+        270337,
+        37366
+      ],
+      "analysis": {
+        "steady_ns": 191699
+      }
+    },
+    {
+      "runtime": "ruby-yjit-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 23947,
+      "prepare_ns": 65990,
+      "samples_ns": [
+        17897,
+        16235,
+        15493
+      ],
+      "analysis": {
+        "steady_ns": 16235
+      }
+    },
+    {
+      "runtime": "ruby-yjit-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 2154599,
+      "prepare_ns": 45970,
+      "samples_ns": [
+        1700044,
+        1689618,
+        1687995
+      ],
+      "analysis": {
+        "steady_ns": 1689618
+      }
+    },
+    {
+      "runtime": "ruby-yjit-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 5999857,
+      "prepare_ns": 134353,
+      "samples_ns": [
+        2058103,
+        1389254,
+        1437137
+      ],
+      "analysis": {
+        "steady_ns": 1437137
+      }
+    },
+    {
+      "runtime": "ruby-yjit-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 7878069,
+      "prepare_ns": 78929,
+      "samples_ns": [
+        4661950,
+        4717173,
+        4597082
+      ],
+      "analysis": {
+        "steady_ns": 4661950
+      }
+    },
+    {
+      "runtime": "ruby-yjit-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 11687524,
+      "prepare_ns": 51968,
+      "samples_ns": [
+        10678452,
+        10633474,
+        10608346
+      ],
+      "analysis": {
+        "steady_ns": 10633474
+      }
+    },
+    {
+      "runtime": "ruby-yjit-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 1105978,
+      "prepare_ns": 49865,
+      "samples_ns": [
+        213932,
+        208905,
+        211098
+      ],
+      "analysis": {
+        "steady_ns": 211098
+      }
+    },
+    {
+      "runtime": "ruby-yjit-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 31226817,
+      "prepare_ns": 50406,
+      "samples_ns": [
+        30626571,
+        31020426,
+        31145995
+      ],
+      "analysis": {
+        "steady_ns": 31020426
+      }
+    },
+    {
+      "runtime": "ruby-yjit-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 401005,
+      "prepare_ns": 77648,
+      "samples_ns": [
+        489468,
+        393353,
+        390729
+      ],
+      "analysis": {
+        "steady_ns": 393353
+      }
+    },
+    {
+      "runtime": "clojure-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 305130,
+      "prepare_ns": 4919048,
+      "samples_ns": [
+        236807,
+        148664,
+        144869
+      ],
+      "analysis": {
+        "steady_ns": 148664
+      }
+    },
+    {
+      "runtime": "clojure-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 19347874,
+      "prepare_ns": 3928935,
+      "samples_ns": [
+        1492090,
+        1254411,
+        1252569
+      ],
+      "analysis": {
+        "steady_ns": 1254411
+      }
+    },
+    {
+      "runtime": "clojure-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 18908993,
+      "prepare_ns": 9932798,
+      "samples_ns": [
+        7970128,
+        1655006,
+        1605291
+      ],
+      "analysis": {
+        "steady_ns": 1655006
+      }
+    },
+    {
+      "runtime": "clojure-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 16383816,
+      "prepare_ns": 11327560,
+      "samples_ns": [
+        8373297,
+        8302159,
+        8114726
+      ],
+      "analysis": {
+        "steady_ns": 8302159
+      }
+    },
+    {
+      "runtime": "clojure-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 30330616,
+      "prepare_ns": 3509472,
+      "samples_ns": [
+        14273323,
+        12073605,
+        13563082
+      ],
+      "analysis": {
+        "steady_ns": 13563082
+      }
+    },
+    {
+      "runtime": "clojure-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 4079672,
+      "prepare_ns": 3814622,
+      "samples_ns": [
+        1687675,
+        1699523,
+        666955
+      ],
+      "analysis": {
+        "steady_ns": 1687675
+      }
+    },
+    {
+      "runtime": "clojure-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 22561761,
+      "prepare_ns": 6617829,
+      "samples_ns": [
+        6057444,
+        6227360,
+        9641407
+      ],
+      "analysis": {
+        "steady_ns": 6227360
+      }
+    },
+    {
+      "runtime": "clojure-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 4023045,
+      "prepare_ns": 8410178,
+      "samples_ns": [
+        1005205,
+        1010303,
+        985436
+      ],
+      "analysis": {
+        "steady_ns": 1005205
+      }
+    },
+    {
+      "runtime": "sbcl-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 5000,
+      "prepare_ns": 2008000,
+      "samples_ns": [
+        3000,
+        2000,
+        3000
+      ],
+      "analysis": {
+        "steady_ns": 3000
+      }
+    },
+    {
+      "runtime": "sbcl-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 2606000,
+      "prepare_ns": 397000,
+      "samples_ns": [
+        2597000,
+        2584000,
+        2593000
+      ],
+      "analysis": {
+        "steady_ns": 2593000
+      }
+    },
+    {
+      "runtime": "sbcl-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 391000,
+      "prepare_ns": 3955000,
+      "samples_ns": [
+        375000,
+        376000,
+        364000
+      ],
+      "analysis": {
+        "steady_ns": 375000
+      }
+    },
+    {
+      "runtime": "sbcl-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 1006000,
+      "prepare_ns": 2339000,
+      "samples_ns": [
+        997000,
+        997000,
+        1014000
+      ],
+      "analysis": {
+        "steady_ns": 997000
+      }
+    },
+    {
+      "runtime": "sbcl-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 16987000,
+      "prepare_ns": 595000,
+      "samples_ns": [
+        16490000,
+        17102000,
+        17725000
+      ],
+      "analysis": {
+        "steady_ns": 17102000
+      }
+    },
+    {
+      "runtime": "sbcl-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 346000,
+      "prepare_ns": 893000,
+      "samples_ns": [
+        286000,
+        306000,
+        285000
+      ],
+      "analysis": {
+        "steady_ns": 286000
+      }
+    },
+    {
+      "runtime": "sbcl-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 5760000,
+      "prepare_ns": 1664000,
+      "samples_ns": [
+        5818000,
+        5421000,
+        5616000
+      ],
+      "analysis": {
+        "steady_ns": 5616000
+      }
+    },
+    {
+      "runtime": "sbcl-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 25000,
+      "prepare_ns": 2836000,
+      "samples_ns": [
+        22000,
+        22000,
+        23000
+      ],
+      "analysis": {
+        "steady_ns": 22000
+      }
+    },
+    {
+      "runtime": "chez-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 30346,
+      "prepare_ns": 1128922,
+      "samples_ns": [
+        5699,
+        2524,
+        1202
+      ],
+      "analysis": {
+        "steady_ns": 2524
+      }
+    },
+    {
+      "runtime": "chez-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 1016994,
+      "prepare_ns": 494686,
+      "samples_ns": [
+        983843,
+        1018866,
+        1018134
+      ],
+      "analysis": {
+        "steady_ns": 1018134
+      }
+    },
+    {
+      "runtime": "chez-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 306142,
+      "prepare_ns": 1369374,
+      "samples_ns": [
+        274925,
+        265570,
+        259632
+      ],
+      "analysis": {
+        "steady_ns": 265570
+      }
+    },
+    {
+      "runtime": "chez-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 692173,
+      "prepare_ns": 1164325,
+      "samples_ns": [
+        653905,
+        648758,
+        634416
+      ],
+      "analysis": {
+        "steady_ns": 648758
+      }
+    },
+    {
+      "runtime": "chez-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 3199033,
+      "prepare_ns": 561416,
+      "samples_ns": [
+        3103218,
+        3072352,
+        3075927
+      ],
+      "analysis": {
+        "steady_ns": 3075927
+      }
+    },
+    {
+      "runtime": "chez-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 116916,
+      "prepare_ns": 581076,
+      "samples_ns": [
+        137117,
+        134072,
+        135534
+      ],
+      "analysis": {
+        "steady_ns": 135534
+      }
+    },
+    {
+      "runtime": "chez-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 6770066,
+      "prepare_ns": 739175,
+      "samples_ns": [
+        6733811,
+        6687471,
+        6713721
+      ],
+      "analysis": {
+        "steady_ns": 6713721
+      }
+    },
+    {
+      "runtime": "chez-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 54492,
+      "prepare_ns": 2568692,
+      "samples_ns": [
+        27091,
+        27191,
+        44908
+      ],
+      "analysis": {
+        "steady_ns": 27191
+      }
+    },
+    {
+      "runtime": "guile-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 344390,
+      "prepare_ns": 401795,
+      "samples_ns": [
+        125526,
+        110885,
+        100279
+      ],
+      "analysis": {
+        "steady_ns": 110885
+      }
+    },
+    {
+      "runtime": "guile-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 82201283,
+      "prepare_ns": 170613,
+      "samples_ns": [
+        79194240,
+        80053680,
+        79463975
+      ],
+      "analysis": {
+        "steady_ns": 79463975
+      }
+    },
+    {
+      "runtime": "guile-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 50073564,
+      "prepare_ns": 584806,
+      "samples_ns": [
+        48757485,
+        49069773,
+        49045832
+      ],
+      "analysis": {
+        "steady_ns": 49045832
+      }
+    },
+    {
+      "runtime": "guile-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 92713732,
+      "prepare_ns": 509574,
+      "samples_ns": [
+        91880183,
+        96207012,
+        91282916
+      ],
+      "analysis": {
+        "steady_ns": 91880183
+      }
+    },
+    {
+      "runtime": "guile-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 448067503,
+      "prepare_ns": 288257,
+      "samples_ns": [
+        446476154,
+        449672143,
+        447924173
+      ],
+      "analysis": {
+        "steady_ns": 447924173
+      }
+    },
+    {
+      "runtime": "guile-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 12653625,
+      "prepare_ns": 266495,
+      "samples_ns": [
+        13065281,
+        10591036,
+        13669246
+      ],
+      "analysis": {
+        "steady_ns": 13065281
+      }
+    },
+    {
+      "runtime": "guile-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 218203018,
+      "prepare_ns": 351430,
+      "samples_ns": [
+        211125480,
+        208623747,
+        203607436
+      ],
+      "analysis": {
+        "steady_ns": 208623747
+      }
+    },
+    {
+      "runtime": "guile-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 6484815,
+      "prepare_ns": 745784,
+      "samples_ns": [
+        3450211,
+        6361302,
+        3217306
+      ],
+      "analysis": {
+        "steady_ns": 3450211
+      }
+    },
+    {
+      "runtime": "bb-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 52199,
+      "prepare_ns": 318981,
+      "samples_ns": [
+        47942,
+        44467,
+        46240
+      ],
+      "analysis": {
+        "steady_ns": 46240
+      }
+    },
+    {
+      "runtime": "bb-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 55764826,
+      "prepare_ns": 198079,
+      "samples_ns": [
+        53956620,
+        47925237,
+        43323780
+      ],
+      "analysis": {
+        "steady_ns": 47925237
+      }
+    },
+    {
+      "runtime": "bb-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 12587516,
+      "prepare_ns": 460124,
+      "samples_ns": [
+        15640708,
+        11782001,
+        11640368
+      ],
+      "analysis": {
+        "steady_ns": 11782001
+      }
+    },
+    {
+      "runtime": "bb-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 27447076,
+      "prepare_ns": 371580,
+      "samples_ns": [
+        25192608,
+        23982663,
+        24196306
+      ],
+      "analysis": {
+        "steady_ns": 24196306
+      }
+    },
+    {
+      "runtime": "bb-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 241109192,
+      "prepare_ns": 259421,
+      "samples_ns": [
+        217262683,
+        218722824,
+        214356232
+      ],
+      "analysis": {
+        "steady_ns": 217262683
+      }
+    },
+    {
+      "runtime": "bb-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 4668858,
+      "prepare_ns": 219041,
+      "samples_ns": [
+        4633805,
+        4658282,
+        4670411
+      ],
+      "analysis": {
+        "steady_ns": 4658282
+      }
+    },
+    {
+      "runtime": "bb-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 81728175,
+      "prepare_ns": 374154,
+      "samples_ns": [
+        77982718,
+        81842016,
+        67723022
+      ],
+      "analysis": {
+        "steady_ns": 77982718
+      }
+    },
+    {
+      "runtime": "bb-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 2418807,
+      "prepare_ns": 512232,
+      "samples_ns": [
+        1959544,
+        1936429,
+        1916759
+      ],
+      "analysis": {
+        "steady_ns": 1936429
+      }
+    },
+    {
+      "runtime": "python-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 11307,
+      "prepare_ns": 965986,
+      "samples_ns": [
+        7852,
+        7211,
+        6420
+      ],
+      "analysis": {
+        "steady_ns": 7211
+      }
+    },
+    {
+      "runtime": "python-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 19111220,
+      "prepare_ns": 948961,
+      "samples_ns": [
+        19054524,
+        19024139,
+        18986612
+      ],
+      "analysis": {
+        "steady_ns": 19024139
+      }
+    },
+    {
+      "runtime": "python-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 7041756,
+      "prepare_ns": 1067279,
+      "samples_ns": [
+        7190369,
+        7053413,
+        7028516
+      ],
+      "analysis": {
+        "steady_ns": 7053413
+      }
+    },
+    {
+      "runtime": "python-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 8708308,
+      "prepare_ns": 1038556,
+      "samples_ns": [
+        8645132,
+        8687256,
+        8750090
+      ],
+      "analysis": {
+        "steady_ns": 8687256
+      }
+    },
+    {
+      "runtime": "python-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 407283239,
+      "prepare_ns": 951234,
+      "samples_ns": [
+        437828845,
+        421773967,
+        418368704
+      ],
+      "analysis": {
+        "steady_ns": 421773967
+      }
+    },
+    {
+      "runtime": "python-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 2015137,
+      "prepare_ns": 994654,
+      "samples_ns": [
+        2025602,
+        2009788,
+        2022749
+      ],
+      "analysis": {
+        "steady_ns": 2022749
+      }
+    },
+    {
+      "runtime": "python-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 43453952,
+      "prepare_ns": 969416,
+      "samples_ns": [
+        43356895,
+        43420802,
+        43371387
+      ],
+      "analysis": {
+        "steady_ns": 43371387
+      }
+    },
+    {
+      "runtime": "python-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 869293,
+      "prepare_ns": 1065852,
+      "samples_ns": [
+        861822,
+        851606,
+        837675
+      ],
+      "analysis": {
+        "steady_ns": 851606
+      }
+    },
+    {
+      "runtime": "c-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 521,
+      "prepare_ns": 48372668,
+      "samples_ns": [
+        461,
+        451,
+        351
+      ],
+      "analysis": {
+        "steady_ns": 451
+      }
+    },
+    {
+      "runtime": "c-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 422583,
+      "prepare_ns": 47178471,
+      "samples_ns": [
+        405477,
+        414030,
+        418617
+      ],
+      "analysis": {
+        "steady_ns": 414030
+      }
+    },
+    {
+      "runtime": "c-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 97939,
+      "prepare_ns": 80103760,
+      "samples_ns": [
+        86902,
+        55745,
+        39961
+      ],
+      "analysis": {
+        "steady_ns": 55745
+      }
+    },
+    {
+      "runtime": "c-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 1042,
+      "prepare_ns": 54470759,
+      "samples_ns": [
+        30,
+        30,
+        30
+      ],
+      "analysis": {
+        "steady_ns": 30
+      }
+    },
+    {
+      "runtime": "c-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 2763676,
+      "prepare_ns": 49480925,
+      "samples_ns": [
+        2686548,
+        2682242,
+        2692327
+      ],
+      "analysis": {
+        "steady_ns": 2686548
+      }
+    },
+    {
+      "runtime": "c-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 81454,
+      "prepare_ns": 49762564,
+      "samples_ns": [
+        80583,
+        97759,
+        80532
+      ],
+      "analysis": {
+        "steady_ns": 80583
+      }
+    },
+    {
+      "runtime": "c-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 983757,
+      "prepare_ns": 55182543,
+      "samples_ns": [
+        1009596,
+        979551,
+        966962
+      ],
+      "analysis": {
+        "steady_ns": 979551
+      }
+    },
+    {
+      "runtime": "c-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 2914,
+      "prepare_ns": 65870588,
+      "samples_ns": [
+        1813,
+        1773,
+        1773
+      ],
+      "analysis": {
+        "steady_ns": 1773
+      }
+    },
+    {
+      "runtime": "java-prepared",
+      "workload": "sieve-array",
+      "status": "ok",
+      "first_ns": 28683,
+      "prepare_ns": 449315513,
+      "samples_ns": [
+        15543,
+        14382,
+        14542
+      ],
+      "analysis": {
+        "steady_ns": 14542
+      }
+    },
+    {
+      "runtime": "java-prepared",
+      "workload": "towers-recursive",
+      "status": "ok",
+      "first_ns": 1376906,
+      "prepare_ns": 403692973,
+      "samples_ns": [
+        986988,
+        961099,
+        1004784
+      ],
+      "analysis": {
+        "steady_ns": 986988
+      }
+    },
+    {
+      "runtime": "java-prepared",
+      "workload": "queens-backtracking",
+      "status": "ok",
+      "first_ns": 915801,
+      "prepare_ns": 413640136,
+      "samples_ns": [
+        550079,
+        515938,
+        495207
+      ],
+      "analysis": {
+        "steady_ns": 515938
+      }
+    },
+    {
+      "runtime": "java-prepared",
+      "workload": "heap-permute",
+      "status": "ok",
+      "first_ns": 1002071,
+      "prepare_ns": 426535144,
+      "samples_ns": [
+        785855,
+        789330,
+        828239
+      ],
+      "analysis": {
+        "steady_ns": 789330
+      }
+    },
+    {
+      "runtime": "java-prepared",
+      "workload": "ackermann-deep",
+      "status": "ok",
+      "first_ns": 6261829,
+      "prepare_ns": 437636248,
+      "samples_ns": [
+        4677490,
+        4590640,
+        4666854
+      ],
+      "analysis": {
+        "steady_ns": 4666854
+      }
+    },
+    {
+      "runtime": "java-prepared",
+      "workload": "tak-branching",
+      "status": "ok",
+      "first_ns": 597160,
+      "prepare_ns": 421995461,
+      "samples_ns": [
+        323748,
+        311440,
+        340113
+      ],
+      "analysis": {
+        "steady_ns": 323748
+      }
+    },
+    {
+      "runtime": "java-prepared",
+      "workload": "collatz-range",
+      "status": "ok",
+      "first_ns": 5018194,
+      "prepare_ns": 418542246,
+      "samples_ns": [
+        2299115,
+        1982788,
+        1307661
+      ],
+      "analysis": {
+        "steady_ns": 1982788
+      }
+    },
+    {
+      "runtime": "java-prepared",
+      "workload": "matrix-multiply",
+      "status": "ok",
+      "first_ns": 266181,
+      "prepare_ns": 426062192,
+      "samples_ns": [
+        283808,
+        264358,
+        266011
+      ],
+      "analysis": {
+        "steady_ns": 266011
+      }
+    }
+  ]
+}

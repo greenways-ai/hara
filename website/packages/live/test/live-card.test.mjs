@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { print, waitForCanvasFirstFrame } from "../src/live-card.js";
+import {
+  afterCaretPlacement,
+  cancelEvaluation,
+  print,
+  waitForCanvasFirstFrame
+} from "../src/live-card.js";
 
 class HtaKeyword { constructor(name) { this.name = name; } }
 class HtaSymbol { constructor(name) { this.name = name; } }
@@ -49,21 +54,60 @@ test("canvas startup rejects tasks that stop without drawing", async () => {
   );
 });
 
-test("live card exposes tabs, desktop/mobile InstaREPL, and resizers", async () => {
+test("cancellable HTA evaluations can be interrupted without closing the kernel", () => {
+  let calls = 0;
+  assert.equal(cancelEvaluation({ cancel() { calls += 1; return true; } }), true);
+  assert.equal(calls, 1);
+  assert.equal(cancelEvaluation(Promise.resolve()), false);
+});
+
+test("mobile caret evaluation waits for the browser placement frame", () => {
+  const frames = [];
+  let calls = 0;
+  afterCaretPlacement(() => { calls += 1; }, {
+    requestFrame: (callback) => frames.push(callback)
+  });
+  assert.equal(calls, 0);
+  assert.equal(frames.length, 1);
+  frames.shift()();
+  assert.equal(calls, 1);
+});
+
+test("a superseded mobile caret evaluation can be cancelled", () => {
+  const frames = [];
+  let calls = 0;
+  const cancel = afterCaretPlacement(() => { calls += 1; }, {
+    requestFrame: (callback) => frames.push(callback)
+  });
+  cancel();
+  frames.shift()();
+  assert.equal(calls, 0);
+});
+
+test("live card exposes tabs, InstaREPL, resizers, interrupt and reset", async () => {
   const source = await readFile(new URL("../src/live-card.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(source, /data-live-eval/);
   assert.match(source, /data-live-run/);
+  assert.match(source, /data-live-reset/);
   assert.match(source, /role="tablist"/);
   assert.match(source, /role", "tab"/);
   assert.match(source, /pointerdown/);
   assert.match(source, /pointerType !== "touch" && event\.button !== 0/);
+  assert.match(source, /pendingPointerEvaluation = true/);
+  assert.match(source, /addEventListener\("click"/);
+  assert.match(source, /afterCaretPlacement/);
   assert.match(source, /createVerticalResizer\(editorSurface/);
   assert.match(source, /createVerticalResizer\(panel/);
   assert.match(source, /waitForCanvasFirstFrame\(rendered, task\)/);
+  assert.match(source, /cancelEvaluation\(task\)/);
+  assert.match(source, /Stop or Esc to interrupt/);
+  assert.match(source, /interrupt: stopCanvas/);
+  assert.match(source, /resetButton\.addEventListener\("click", reset\)/);
   assert.match(source, /Open in Playground/);
   assert.match(styles, /\.hara-live-card-tabs/);
   assert.match(styles, /\.hara-live-card-resizer/);
+  assert.doesNotMatch(source, /setTimeout\(\(\) => evalCurrent/);
   assert.doesNotMatch(source, /data-live-example/);
   assert.doesNotMatch(source, /<select/);
 });
