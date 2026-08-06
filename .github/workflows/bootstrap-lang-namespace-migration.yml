@@ -4,6 +4,7 @@ name: Bootstrap lang namespace migration
 # Pull-request invocation marker: recover the generated HARA-1 branch.
 # Active-workflow push marker: generate the review branch now.
 # Fixed-cleanup pull-request marker: generate the review branch now.
+# Synchronize marker: execute the fixed generator from this bounded PR.
 # The pull_request event below is restricted to disposable trigger branches.
 on:
   push:
