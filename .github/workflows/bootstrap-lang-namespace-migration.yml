@@ -1,6 +1,7 @@
 name: Bootstrap lang namespace migration
 
 # Invocation marker: run the atomic namespace migration from this main push.
+# Pull-request invocation marker: recover the generated HARA-1 branch.
 # The pull_request event below is restricted to disposable trigger branches.
 on:
   push:
