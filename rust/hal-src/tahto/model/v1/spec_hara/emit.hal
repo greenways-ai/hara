@@ -59,16 +59,20 @@
 
 (defn lower-vector
   [value context]
-  (mapv #(lower % context) value))
+  (form
+   (concat ['tahto.runtime.hara/arr-new]
+           (map #(lower % context) value))))
 
 (defn lower-map
   [value context]
-  (reduce-kv
-   (fn [out key item]
-     (assoc out (lower key context)
-                (lower item context)))
-   {}
-   value))
+  (form
+   (reduce-kv
+    (fn [out key item]
+      (conj out
+            (lower key context)
+            (lower item context)))
+    ['tahto.runtime.hara/obj-new]
+    value)))
 
 (defn lower-set
   [value context]
@@ -481,16 +485,13 @@
         "x:ex-data" (list 'ex-data (lowered (argument 0)))
         "x:type-native" (list 'type (lowered (argument 0)))
         "x:get-key" (if (> (count arguments) 2)
-                       (list 'let ['__tahto_value
-                                   (list 'get
-                                         (lowered (argument 0))
-                                         (lowered (argument 1)))]
-                             (list 'if (list 'nil? '__tahto_value)
-                                   (lowered (argument 2))
-                                   '__tahto_value))
-                       (list 'get
-                             (lowered (argument 0))
-                             (lowered (argument 1))))
+                      (list 'tahto.runtime.hara/obj-get
+                            (lowered (argument 0))
+                            (lowered (argument 1))
+                            (lowered (argument 2)))
+                      (list 'tahto.runtime.hara/obj-get
+                            (lowered (argument 0))
+                            (lowered (argument 1))))
         "x:set-key" (lower-assignment
                      (list '. (argument 0) [(argument 1)])
                      (argument 2)
@@ -500,31 +501,33 @@
                      'tahto.runtime.hara/del-path!
                      [[(argument 1)]]
                      context)
-        "x:get-idx" (list 'nth
-                           (lowered (argument 0))
-                           (lowered (argument 1)))
+        "x:get-idx" (list 'tahto.runtime.hara/arr-get
+                          (lowered (argument 0))
+                          (lowered (argument 1)))
         "x:set-idx" (lower-assignment
                      (list '. (argument 0) [(argument 1)])
                      (argument 2)
                      context)
-        "x:has-key?" (let [check (if (> (count arguments) 2)
-                                    (argument 2)
-                                    nil)
-                           found (list 'has?
-                                       (lowered (argument 0))
-                                       (lowered (argument 1)))]
-                       (if (> (count arguments) 2)
-                         (list '= (lowered check) found)
-                         found))
-        "x:obj-keys" (list 'vec (list 'keys (lowered (argument 0))))
-        "x:obj-vals" (list 'vec (list 'vals (lowered (argument 0))))
-        "x:obj-clone" (list 'into {} (lowered (argument 0)))
+        "x:has-key?" (let [found
+                          (list 'tahto.runtime.hara/obj-has?
+                                (lowered (argument 0))
+                                (lowered (argument 1)))]
+                      (if (> (count arguments) 2)
+                        (list '= (lowered (argument 2)) found)
+                        found))
+        "x:obj-keys" (list 'tahto.runtime.hara/obj-keys
+                           (lowered (argument 0)))
+        "x:obj-vals" (list 'tahto.runtime.hara/obj-vals
+                           (lowered (argument 0)))
+        "x:obj-clone" (list 'tahto.runtime.hara/obj-clone
+                            (lowered (argument 0)))
         "x:obj-assign" (mutation-call
                         (argument 0)
                         'tahto.runtime.hara/obj-assign!
                         (drop 1 arguments)
                         context)
-        "x:arr-clone" (list 'vec (lowered (argument 0)))
+        "x:arr-clone" (list 'tahto.runtime.hara/arr-clone
+                            (lowered (argument 0)))
         "x:arr-push" (mutation-call
                       (argument 0)
                       'tahto.runtime.hara/arr-push!
@@ -560,18 +563,18 @@
                          'tahto.runtime.hara/arr-reverse!
                          []
                          context)
-        "x:arr-map" (list 'map
-                          (lowered (argument 1))
-                          (lowered (argument 0)))
-        "x:arr-filter" (list 'filter
-                             (lowered (argument 1))
-                             (lowered (argument 0)))
-        "x:arr-foldl" (list 'reduce
+        "x:arr-map" (list 'tahto.runtime.hara/arr-map
+                          (lowered (argument 0))
+                          (lowered (argument 1)))
+        "x:arr-filter" (list 'tahto.runtime.hara/arr-filter
+                             (lowered (argument 0))
+                             (lowered (argument 1)))
+        "x:arr-foldl" (list 'tahto.runtime.hara/arr-fold-left
+                            (lowered (argument 0))
                             (lowered (argument 1))
                             (if (> (count arguments) 2)
                               (lowered (argument 2))
-                              nil)
-                            (lowered (argument 0)))
+                              nil))
         "x:arr-some" (list 'any?
                            (lowered (argument 1))
                            (lowered (argument 0)))
@@ -585,8 +588,10 @@
         "x:is-integer?" (list 'integer? (lowered (argument 0)))
         "x:is-boolean?" (list 'boolean? (lowered (argument 0)))
         "x:is-function?" (list 'fn? (lowered (argument 0)))
-        "x:is-object?" (list 'map? (lowered (argument 0)))
-        "x:is-array?" (list 'vector? (lowered (argument 0)))
+        "x:is-object?" (list 'tahto.runtime.hara/obj?
+                             (lowered (argument 0)))
+        "x:is-array?" (list 'tahto.runtime.hara/arr?
+                            (lowered (argument 0)))))
         "x:apply" (list 'apply
                         (lowered (argument 0))
                         (lowered (argument 1)))
