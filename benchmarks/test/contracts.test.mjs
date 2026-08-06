@@ -10,7 +10,8 @@ const classPanel = await readFile(new URL("../src/components/ClassPanel.astro", 
 const reference = await readFile(new URL("../src/components/RuntimeReference.astro", import.meta.url), "utf8");
 const header = await readFile(new URL("../src/components/SiteHeader.astro", import.meta.url), "utf8");
 const data = await readFile(new URL("../src/lib/benchmark-data.ts", import.meta.url), "utf8");
-const source = [page, language, reference, header, data].join("\n");
+const installer = await readFile(new URL("../../scripts/install-benchmark-site", import.meta.url), "utf8");
+const source = [page, language, classPanel, reference, header, data].join("\n");
 const indexOf = (value) => { const index = language.indexOf(value); assert.notEqual(index, -1, `Expected language panel to contain ${value}`); return index; };
 
 test("uses the nine canonical internal artifacts", () => {
@@ -21,18 +22,26 @@ test("opens on a four-tab class-first presentation", () => {
   assert.match(page, /aria-selected="true" aria-controls="class-comparison"/);
   assert.doesNotMatch(source, /aria-controls="methodology"|id="methodology"/);
 });
-test("serves best-in-class, lisp family and reference groups from the verified class run", () => {
-  assert.deepEqual(catalog.class_competitors, ["luajit", "pypy", "node", "ruby-yjit"]);
+test("serves every measured class, Lisp and reference runtime from the canonical run", () => {
+  assert.deepEqual(catalog.class_competitors, ["luajit", "pypy", "node", "ruby-yjit", "clojure"]);
   assert.deepEqual(catalog.lisp_competitors, ["sbcl", "chez", "guile", "bb", "clojure"]);
+  assert.deepEqual(catalog.reference_competitors, ["rust", "c", "java", "python"]);
   assert.match(page, /ClassPanel/);
   assert.match(classPanel, /id="class-comparison"/);
+  assert.match(classPanel, /Rust, C, Java and Python/);
   assert.match(classPanel, /data-comparison-cell/);
   assert.match(classPanel, /data-matrix-detail/);
   assert.match(data, /haraClassRuntime = "hara-rust-whole-wasm-prepared"/);
-  assert.ok(classEvidence.runtime_order.includes("pypy-prepared"));
-  assert.ok(classEvidence.runtime_order.includes("node-prepared"));
-  assert.ok(classEvidence.runtime_order.includes("ruby-yjit-prepared"));
-  assert.ok(classEvidence.runtime_order.includes("clojure-prepared"));
+  assert.match(data, /"rust-prepared": "Rust"/);
+  for (const runtime of [
+    "pypy-prepared",
+    "node-prepared",
+    "ruby-yjit-prepared",
+    "clojure-prepared",
+    "rust-prepared"
+  ]) {
+    assert.ok(classEvidence.runtime_order.includes(runtime), `missing ${runtime} from canonical runtime order`);
+  }
   const workloads = catalog.corpus.workloads;
   const covered = new Set(classEvidence.measurements.map((row) => `${row.runtime}/${row.workload}`));
   for (const runtime of classEvidence.runtime_order) {
@@ -40,6 +49,14 @@ test("serves best-in-class, lisp family and reference groups from the verified c
       assert.ok(covered.has(`${runtime}/${workload}`), `missing class evidence for ${runtime}/${workload}`);
     }
   }
+});
+test("keeps Astro as renderer while synchronizing canonical benchmark data", () => {
+  assert.match(installer, /prepare\) prepare/);
+  assert.match(installer, /publish\) publish/);
+  assert.match(installer, /<title>Hara Benchmarks<\/title>/);
+  assert.match(installer, /Published canonical benchmark data alongside the Astro site/);
+  assert.doesNotMatch(installer, /rm -rf "\$DEST"/);
+  assert.doesNotMatch(installer, /app\.js|shootout\.js|styles\.css|shootout\.css/);
 });
 test("puts overview and insights before the drill-down matrix", () => {
   const overview = indexOf("Overview");
