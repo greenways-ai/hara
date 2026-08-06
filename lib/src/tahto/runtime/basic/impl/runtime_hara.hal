@@ -1,0 +1,28 @@
+(ns tahto.runtime.basic.impl.runtime-hara
+  (:require [tahto.core.runtime :as runtime]
+            [tahto.runtime.basic.type-hara :as hara]))
+
+(def +hara-basic+
+  (runtime/install-type!
+   :hara :basic
+   {:type :tahto/rt.hara-basic
+    :instance {:create hara/rt-hara:create
+               :start hara/start-hara
+               :stop hara/stop-hara
+               :raw-eval hara/raw-eval-hara}}))
+
+(def +xtalk-basic+
+  (runtime/install-type!
+   :xtalk :basic
+   {:type :tahto/rt.hara-basic
+    :config {:target :hara
+             :compatibility-alias true}
+    :instance {:create hara/rt-hara:create
+               :start hara/start-hara
+               :stop hara/stop-hara
+               :raw-eval hara/raw-eval-hara}}))
+
+(def +init+
+  {:target :hara
+   :hara +hara-basic+
+   :xtalk +xtalk-basic+})

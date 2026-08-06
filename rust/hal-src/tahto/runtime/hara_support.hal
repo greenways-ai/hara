@@ -1,0 +1,221 @@
+(ns tahto.runtime.hara-support
+  (:require [std.foundation.json :as json]
+            [std.foundation.string :as string]))
+
+(def +return-control+ :tahto.hara/return)
+(def +break-control+ :tahto.hara/break)
+
+(defn control!
+  "Raises one private control-flow signal used by emitted Hara target code."
+  [control value]
+  (throw
+   (ex-info "Tahto Hara target control flow"
+            {:tahto.hara/control control
+             :value value})))
+
+(defn return!
+  "Implements XTalk return from any nested branch or loop."
+  [value]
+  (control! +return-control+ value))
+
+(defn break!
+  "Implements XTalk break from the nearest emitted loop."
+  ([] (break! nil))
+  ([value]
+   (control! +break-control+ value)))
+
+(defn with-control
+  "Runs thunk and catches only the selected private control signal."
+  [control thunk]
+  (try
+    (thunk)
+    (catch Throwable error
+      (let [data (ex-data error)]
+        (if (= control (get data :tahto.hara/control))
+          (get data :value)
+          (throw error))))))
+
+(defn with-return
+  [thunk]
+  (with-control +return-control+ thunk))
+
+(defn with-break
+  [thunk]
+  (with-control +break-control+ thunk))
+
+(defn error!
+  "Raises an XTalk-compatible target error."
+  ([message]
+   (error! message nil))
+  ([message data]
+   (throw (ex-info (str message)
+                   (merge {:tahto.hara/error true}
+                          (or data {}))))))
+
+(defn not-nil?
+  [value]
+  (not (nil? value)))
+
+(defn assoc-path
+  "Returns value with replacement associated at path."
+  [value path replacement]
+  (if (empty? path)
+    replacement
+    (let [key (first path)
+          remaining (vec (rest path))
+          current (if (map? value) value {})]
+      (assoc current
+             key
+             (assoc-path (get current key)
+                         remaining
+                         replacement)))))
+
+(defn dissoc-path
+  "Returns value with the terminal path key removed."
+  [value path]
+  (cond
+    (empty? path)
+    value
+
+    (= 1 (count path))
+    (dissoc value (first path))
+
+    :else
+    (let [key (first path)
+          remaining (vec (rest path))]
+      (assoc value
+             key
+             (dissoc-path (get value key)
+                          remaining)))))
+
+(defn object-keys
+  [value]
+  (into [] (keys value)))
+
+(defn object-clone
+  [value]
+  (into {} value))
+
+(defn array-clone
+  [value]
+  (into [] value))
+
+(defn array-push!
+  [cell value]
+  (let [next-value (conj (deref cell) value)]
+    (vreset! cell next-value)
+    (count next-value)))
+
+(defn array-push-first!
+  [cell value]
+  (let [next-value (into [value] (deref cell))]
+    (vreset! cell next-value)
+    (count next-value)))
+
+(defn array-pop!
+  [cell]
+  (let [current (deref cell)
+        amount (count current)]
+    (if (= 0 amount)
+      nil
+      (let [value (nth current (- amount 1))
+            next-value (into [] (take (- amount 1) current))]
+        (vreset! cell next-value)
+        value))))
+
+(defn array-pop-first!
+  [cell]
+  (let [current (deref cell)]
+    (if (empty? current)
+      nil
+      (let [value (nth current 0)
+            next-value (into [] (drop 1 current))]
+        (vreset! cell next-value)
+        value))))
+
+(defn array-insert!
+  [cell index value]
+  (let [current (deref cell)
+        next-value
+        (into []
+              (concat (take index current)
+                      [value]
+                      (drop index current)))]
+    (vreset! cell next-value)
+    next-value))
+
+(defn array-remove!
+  [cell index]
+  (let [current (deref cell)
+        amount (count current)]
+    (if (or (< index 0) (>= index amount))
+      nil
+      (let [value (nth current index)
+            next-value
+            (into []
+                  (concat (take index current)
+                          (drop (+ index 1) current)))]
+        (vreset! cell next-value)
+        value))))
+
+(defn array-map
+  [values function]
+  (into [] (map function values)))
+
+(defn fold-right
+  [values function initial]
+  (reduce (fn [acc value]
+            (function value acc))
+          initial
+          (reverse values)))
+
+(defn string-compare
+  [left right]
+  (cond (< left right) -1
+        (> left right) 1
+        :else 0))
+
+(defn to-string
+  [value]
+  (str value))
+
+(defn json-encode
+  [value]
+  (json/write value))
+
+(defn json-decode
+  [source]
+  (json/read source))
+
+(defn string-char
+  [value index]
+  (string/char-at value index))
+
+(defn string-split
+  [value separator]
+  (string/split value separator))
+
+(defn string-join
+  [separator values]
+  (string/join separator values))
+
+(defn string-index-of
+  ([value part]
+   (string/index-of value part))
+  ([value part offset]
+   (string/index-of value part offset)))
+
+(defn string-substring
+  ([value start]
+   (string/slice value start))
+  ([value start end]
+   (string/slice value start end)))
+
+(defn unsupported
+  "Fails explicitly instead of silently changing XTalk target semantics."
+  [operation arguments]
+  (throw
+   (ex-info "XTalk operation is not implemented by the Hara target"
+            {:tahto/error-code :tahto.hara/unsupported-operation
+             :operation operation
+             :arguments arguments})))

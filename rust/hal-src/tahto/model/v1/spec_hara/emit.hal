@@ -1,0 +1,860 @@
+(ns tahto.model.v1.spec-hara.emit
+  (:require [std.foundation.string :as string]))
+
+(def +assignment-ops+ '#{:= :+= :-= :*=})
+(def +mutating-ops+
+  '#{x:set-key x:del-key
+     x:arr-push x:arr-pop x:arr-push-first x:arr-pop-first
+     x:arr-insert x:arr-remove})
+
+(def +symbol-map+
+  {'== '=
+   'x:print 'println
+   'x:len 'count
+   'x:cat 'str
+   'x:err 'tahto.runtime.hara-support/error!
+   'x:ex-new 'ex-info
+   'x:ex-message 'ex-message
+   'x:ex-data 'ex-data
+   'x:to-string 'tahto.runtime.hara-support/to-string
+   'x:is-string? 'string?
+   'x:is-number? 'number?
+   'x:is-integer? 'integer?
+   'x:is-boolean? 'boolean?
+   'x:is-function? 'fn?
+   'x:is-object? 'map?
+   'x:is-array? 'vector?
+   'x:json-encode 'tahto.runtime.hara-support/json-encode
+   'x:json-decode 'tahto.runtime.hara-support/json-decode
+   'x:str-comp 'tahto.runtime.hara-support/string-compare
+   'x:str-char 'tahto.runtime.hara-support/string-char
+   'x:str-split 'tahto.runtime.hara-support/string-split
+   'x:str-join 'tahto.runtime.hara-support/string-join
+   'x:str-index-of 'tahto.runtime.hara-support/string-index-of
+   'x:str-substring 'tahto.runtime.hara-support/string-substring
+   'x:str-to-upper 'std.foundation.string/upper
+   'x:str-to-lower 'std.foundation.string/lower
+   'x:str-to-fixed 'std.foundation.string/to-fixed
+   'x:str-replace 'std.foundation.string/replace
+   'x:str-trim 'std.foundation.string/trim
+   'x:str-trim-left 'std.foundation.string/trim-left
+   'x:str-trim-right 'std.foundation.string/trim-right
+   'x:str-pad-left 'std.foundation.string/pad-left
+   'x:str-pad-right 'std.foundation.string/pad-right
+   'x:str-starts-with 'std.foundation.string/starts-with?
+   'x:str-ends-with 'std.foundation.string/ends-with?
+   'x:m-abs 'abs
+   'x:m-ceil 'ceil
+   'x:m-floor 'floor
+   'x:m-max 'max
+   'x:m-min 'min
+   'x:m-mod 'mod
+   'x:m-quot 'quot})
+
+(declare lower-expr)
+(declare lower-body)
+
+(defn fail
+  [message form context]
+  (throw
+   (ex-info message
+            {:tahto/error-code :tahto.hara/unsupported-form
+             :form form
+             :module (let [module (get context :module)]
+                       (if (map? module) (get module :id) module))
+             :entry (get context :tahto/entry)})))
+
+(defn canonical-op
+  [operation]
+  (if (symbol? operation)
+    (let [operation-name (name operation)]
+      (if (string/starts-with? operation-name "x:")
+        (symbol operation-name)
+        operation))
+    operation))
+
+(defn context-module
+  [context]
+  (let [entry-module (get-in context [:tahto/entry :module])
+        module (get context :module)]
+    (or entry-module
+        (if (map? module) (get module :id) module))))
+
+(defn qualify-top-symbol
+  [symbol context]
+  (let [module (context-module context)]
+    (if (or (namespace symbol) (nil? module))
+      symbol
+      (symbol (str module) (name symbol)))))
+
+(defn path-target
+  [target]
+  (if (and (list? target)
+           (= '. (first target))
+           (symbol? (second target)))
+    (let [segments (drop 2 target)
+          valid?
+          (reduce (fn [out segment]
+                    (and out
+                         (vector? segment)
+                         (= 1 (count segment))))
+                  true
+                  segments)]
+      (if valid?
+        {:base (second target)
+         :path (into [] (map first segments))}
+        nil))
+    nil))
+
+(defn target-base-symbol
+  [target]
+  (cond
+    (symbol? target)
+    target
+
+    (path-target target)
+    (get (path-target target) :base)
+
+    :else
+    nil))
+
+(defn merge-assigned
+  [values]
+  (reduce (fn [out value]
+            (into out (collect-assigned value)))
+          #{}
+          values))
+
+(defn collect-assigned
+  [form]
+  (cond
+    (list? form)
+    (let [operation (canonical-op (first form))]
+      (cond
+        (= operation 'quote)
+        #{}
+
+        (or (= operation 'fn)
+            (= operation 'defn)
+            (= operation 'defn-)
+            (= operation 'defgen))
+        #{}
+
+        (has? +assignment-ops+ operation)
+        (let [base (target-base-symbol (second form))]
+          (into (if base #{base} #{})
+                (merge-assigned (drop 2 form))))
+
+        (has? +mutating-ops+ operation)
+        (let [base (target-base-symbol (second form))]
+          (into (if base #{base} #{})
+                (merge-assigned (drop 2 form))))
+
+        :else
+        (merge-assigned form)))
+
+    (or (vector? form)
+        (set? form))
+    (merge-assigned form)
+
+    (map? form)
+    (merge-assigned (concat (keys form) (vals form)))
+
+    :else
+    #{}))
+
+(defn mutable-symbol?
+  [environment symbol]
+  (has? (or (get environment :mutable) #{}) symbol))
+
+(defn lower-symbol
+  [symbol environment]
+  (if (mutable-symbol? environment symbol)
+    (list 'deref symbol)
+    (or (get +symbol-map+ (canonical-op symbol))
+        symbol)))
+
+(defn lower-map
+  [value environment]
+  (reduce-kv
+   (fn [out key item]
+     (assoc out
+            (lower-expr key environment)
+            (lower-expr item environment)))
+   {}
+   value))
+
+(defn lower-vector
+  [value environment]
+  (into [] (map (fn [item]
+                  (lower-expr item environment))
+                value)))
+
+(defn lower-set
+  [value environment]
+  (into #{} (map (fn [item]
+                   (lower-expr item environment))
+                 value)))
+
+(defn var-form?
+  [form]
+  (and (list? form)
+       (= 'var (canonical-op (first form)))))
+
+(defn var-parts
+  [form context]
+  (let [items (vec form)
+        amount (count items)
+        symbol (if (> amount 1) (nth items 1) nil)
+        assign-token (if (> amount 2) (nth items 2) nil)
+        value (cond
+                (= assign-token ':=)
+                (if (> amount 3) (nth items 3) nil)
+
+                (> amount 2)
+                assign-token
+
+                :else
+                nil)]
+    (if (symbol? symbol)
+      [symbol value]
+      (fail "The Hara target currently requires simple-symbol var bindings"
+            form context))))
+
+(defn lowered-sequence
+  [forms environment]
+  (let [items (vec forms)]
+    (cond
+      (empty? items)
+      nil
+
+      (= 1 (count items))
+      (lower-expr (first items) environment)
+
+      :else
+      (apply list
+             'do
+             (map (fn [item]
+                    (lower-expr item environment))
+                  items)))))
+
+(defn lower-body
+  [forms environment]
+  (let [items (vec forms)]
+    (if (empty? items)
+      nil
+      (let [current (first items)
+            remaining (vec (rest items))]
+        (if (var-form? current)
+          (let [[symbol value] (var-parts current environment)
+                init (lower-expr value environment)
+                next-environment
+                (assoc environment
+                       :mutable
+                       (conj (or (get environment :mutable) #{}) symbol))]
+            (list 'let
+                  [symbol (list 'volatile init)]
+                  (lower-body remaining next-environment)))
+          (if (empty? remaining)
+            (lower-expr current environment)
+            (list 'do
+                  (lower-expr current environment)
+                  (lower-body remaining environment))))))))
+
+(defn lower-args
+  [arguments context]
+  (loop [out []
+         remaining (vec arguments)]
+    (if (empty? remaining)
+      out
+      (let [argument (first remaining)]
+        (cond
+          (symbol? argument)
+          (recur (conj out argument) (vec (rest remaining)))
+
+          (and (list? argument)
+               (= :.. (first argument))
+               (= 2 (count argument))
+               (symbol? (second argument)))
+          (if (= 1 (count remaining))
+            (conj out '& (second argument))
+            (fail "Rest arguments must be final for the Hara target"
+                  arguments context))
+
+          :else
+          (fail "The Hara target currently requires symbol function arguments"
+                argument context))))))
+
+(defn argument-symbols
+  [arguments]
+  (into #{}
+        (filter symbol?
+                (remove (fn [value] (= value '&)) arguments))))
+
+(defn function-body
+  [arguments body environment context]
+  (let [hara-arguments (lower-args arguments context)
+        assigned (collect-assigned (apply list 'do body))
+        mutable-arguments
+        (into #{}
+              (filter (fn [symbol]
+                        (has? assigned symbol))
+                      (argument-symbols hara-arguments)))
+        next-environment
+        (assoc environment
+               :mutable
+               (into (or (get environment :mutable) #{})
+                     mutable-arguments))
+        lowered (lower-body body next-environment)
+        bindings
+        (into []
+              (mapcat (fn [symbol]
+                        [symbol (list 'volatile symbol)])
+                      (sort-by str mutable-arguments)))
+        lowered
+        (if (empty? bindings)
+          lowered
+          (list 'let bindings lowered))]
+    [hara-arguments
+     (list 'tahto.runtime.hara-support/with-return
+           (list 'fn [] lowered))]))
+
+(defn declaration-body
+  [form context]
+  (let [items (vec (drop 2 form))]
+    (loop [remaining items]
+      (cond
+        (empty? remaining)
+        (fail "Function declaration has no argument vector" form context)
+
+        (vector? (first remaining))
+        [(first remaining) (vec (rest remaining))]
+
+        :else
+        (recur (vec (rest remaining)))))))
+
+(defn lower-defn
+  [form environment context]
+  (let [symbol (second form)
+        [arguments body] (declaration-body form context)
+        [hara-arguments hara-body]
+        (function-body arguments body environment context)]
+    (list 'defn
+          (qualify-top-symbol symbol context)
+          hara-arguments
+          hara-body)))
+
+(defn lower-fn
+  [form environment context]
+  (let [items (vec (rest form))
+        named? (and (symbol? (first items))
+                    (> (count items) 1)
+                    (vector? (second items)))
+        arguments (if named? (second items) (first items))
+        body (if named? (drop 2 items) (drop 1 items))
+        [hara-arguments hara-body]
+        (function-body arguments body environment context)]
+    (list 'fn hara-arguments hara-body)))
+
+(defn lower-def
+  [form environment context]
+  (let [items (vec form)
+        symbol (second items)
+        value (if (> (count items) 2)
+                (nth items (- (count items) 1))
+                nil)]
+    (list 'def
+          (qualify-top-symbol symbol context)
+          (lower-expr value environment))))
+
+(defn lower-branches
+  [branches environment context]
+  (let [items (vec branches)]
+    (if (empty? items)
+      nil
+      (let [branch (first items)
+            operation (canonical-op (first branch))]
+        (cond
+          (or (= operation 'if)
+              (= operation 'elseif))
+          (list 'if
+                (lower-expr (second branch) environment)
+                (lower-body (drop 2 branch) environment)
+                (lower-branches (rest items) environment context))
+
+          (= operation 'else)
+          (lower-body (rest branch) environment)
+
+          :else
+          (fail "Unsupported Hara branch form" branch context))))))
+
+(defn lower-cond
+  [form environment]
+  (let [pairs (partition 2 (rest form))]
+    (apply list
+           'cond
+           (mapcat (fn [pair]
+                     (let [check (first pair)
+                           value (second pair)]
+                       [(if (= check :else)
+                          :else
+                          (lower-expr check environment))
+                        (lower-expr value environment)]))
+                   pairs))))
+
+(defn assignment-path
+  [target environment context]
+  (cond
+    (symbol? target)
+    {:base target :path nil}
+
+    (path-target target)
+    (let [parsed (path-target target)]
+      {:base (get parsed :base)
+       :path (lower-vector (get parsed :path) environment)})
+
+    :else
+    (fail "The Hara target requires a symbol or structural path assignment"
+          target context)))
+
+(defn lower-assignment
+  [operation target value environment context]
+  (let [{:keys [base path]} (assignment-path target environment context)]
+    (if (not (mutable-symbol? environment base))
+      (fail "Assignment target is not a mutable XTalk local or argument"
+            target context)
+      (let [lowered-value (lower-expr value environment)
+            binary-op (cond (= operation :+=) '+
+                            (= operation :-=) '-
+                            (= operation :*=) '*
+                            :else nil)]
+        (if (nil? path)
+          (if binary-op
+            (list 'vswap! base binary-op lowered-value)
+            (list 'vreset! base lowered-value))
+          (let [current (list 'get-in (list 'deref base) path)
+                replacement (if binary-op
+                              (list binary-op current lowered-value)
+                              lowered-value)]
+            (list 'let
+                  ['__hara_value replacement]
+                  (list 'do
+                        (list 'vreset!
+                              base
+                              (list 'tahto.runtime.hara-support/assoc-path
+                                    (list 'deref base)
+                                    path
+                                    '__hara_value))
+                        '__hara_value))))))))
+
+(defn lower-delete
+  [target environment context]
+  (let [{:keys [base path]} (assignment-path target environment context)]
+    (if (or (nil? path)
+            (not (mutable-symbol? environment base)))
+      (fail "Deletion requires a mutable structural path"
+            target context)
+      (list 'vreset!
+            base
+            (list 'tahto.runtime.hara-support/dissoc-path
+                  (list 'deref base)
+                  path)))))
+
+(defn lower-access
+  [form environment context]
+  (let [target (lower-expr (second form) environment)
+        segments (drop 2 form)]
+    (reduce
+     (fn [current segment]
+       (cond
+         (and (vector? segment)
+              (= 1 (count segment)))
+         (list 'get current
+               (lower-expr (first segment) environment))
+
+         (or (symbol? segment)
+             (keyword? segment)
+             (string? segment))
+         (list 'get current
+               (if (string? segment)
+                 segment
+                 (name segment)))
+
+         :else
+         (fail "The first Hara target slice supports structural access only"
+               segment context)))
+     target
+     segments)))
+
+(defn lower-for
+  [form environment context]
+  (let [control (second form)
+        body (drop 2 form)]
+    (if (and (vector? control)
+             (= 3 (count control))
+             (var-form? (first control)))
+      (let [[symbol init-value] (var-parts (first control) context)
+            next-environment
+            (assoc environment
+                   :mutable
+                   (conj (or (get environment :mutable) #{}) symbol))
+            condition (lower-expr (second control) next-environment)
+            iteration (third control)
+            iteration-forms (if (vector? iteration) iteration [iteration])
+            loop-body (lower-body body next-environment)
+            loop-step (lower-body iteration-forms next-environment)]
+        (list 'let
+              [symbol (list 'volatile (lower-expr init-value environment))]
+              (list 'tahto.runtime.hara-support/with-break
+                    (list 'fn []
+                          (list 'loop []
+                                (list 'if
+                                      condition
+                                      (list 'do
+                                            loop-body
+                                            loop-step
+                                            (list 'recur))
+                                      nil))))))
+      (fail "The Hara target requires canonical three-part for control"
+            form context))))
+
+(defn lower-while
+  [form environment]
+  (let [condition (lower-expr (second form) environment)
+        body (lower-body (drop 2 form) environment)]
+    (list 'tahto.runtime.hara-support/with-break
+          (list 'fn []
+                (list 'loop []
+                      (list 'if
+                            condition
+                            (list 'do body (list 'recur))
+                            nil))))))
+
+(defn lower-catch
+  [form environment context]
+  (let [items (vec (rest form))]
+    (cond
+      (and (> (count items) 1)
+           (symbol? (first items))
+           (= 'Throwable (first items)))
+      (apply list
+             'catch
+             'Throwable
+             (second items)
+             [(lower-body (drop 2 items) environment)])
+
+      (and (> (count items) 0)
+           (symbol? (first items)))
+      (apply list
+             'catch
+             'Throwable
+             (first items)
+             [(lower-body (drop 1 items) environment)])
+
+      :else
+      (fail "Unsupported Hara catch clause" form context))))
+
+(defn lower-try
+  [form environment context]
+  (let [parts (rest form)
+        body (take-while (fn [part]
+                           (not (and (list? part)
+                                     (or (= 'catch (first part))
+                                         (= 'finally (first part))))))
+                         parts)
+        clauses (drop (count body) parts)]
+    (apply list
+           'try
+           (concat
+            [(lower-body body environment)]
+            (map (fn [clause]
+                   (if (= 'catch (first clause))
+                     (lower-catch clause environment context)
+                     (apply list
+                            'finally
+                            [(lower-body (rest clause) environment)])))
+                 clauses)))))
+
+(defn mutable-cell
+  [target environment context]
+  (if (and (symbol? target)
+           (mutable-symbol? environment target))
+    target
+    (fail "Mutable collection operation requires a mutable XTalk local or argument"
+          target context)))
+
+(defn lower-mutating-call
+  [operation form environment context]
+  (let [target (second form)
+        cell (mutable-cell target environment context)]
+    (cond
+      (= operation 'x:set-key)
+      (lower-assignment ':=
+                        (list '. target [(third form)])
+                        (nth form 3)
+                        environment context)
+
+      (= operation 'x:del-key)
+      (lower-delete (list '. target [(third form)])
+                    environment context)
+
+      (= operation 'x:arr-push)
+      (list 'tahto.runtime.hara-support/array-push!
+            cell
+            (lower-expr (third form) environment))
+
+      (= operation 'x:arr-pop)
+      (list 'tahto.runtime.hara-support/array-pop! cell)
+
+      (= operation 'x:arr-push-first)
+      (list 'tahto.runtime.hara-support/array-push-first!
+            cell
+            (lower-expr (third form) environment))
+
+      (= operation 'x:arr-pop-first)
+      (list 'tahto.runtime.hara-support/array-pop-first! cell)
+
+      (= operation 'x:arr-insert)
+      (list 'tahto.runtime.hara-support/array-insert!
+            cell
+            (lower-expr (third form) environment)
+            (lower-expr (nth form 3) environment))
+
+      (= operation 'x:arr-remove)
+      (list 'tahto.runtime.hara-support/array-remove!
+            cell
+            (lower-expr (third form) environment))
+
+      :else
+      (fail "Unknown Hara mutation operation" form context))))
+
+(defn lower-x-call
+  [operation form environment context]
+  (cond
+    (= operation 'x:get-key)
+    (apply list
+           'get
+           (map (fn [value]
+                  (lower-expr value environment))
+                (rest form)))
+
+    (= operation 'x:get-path)
+    (apply list
+           'get-in
+           (map (fn [value]
+                  (lower-expr value environment))
+                (rest form)))
+
+    (= operation 'x:get-idx)
+    (list 'nth
+          (lower-expr (second form) environment)
+          (lower-expr (third form) environment))
+
+    (= operation 'x:has-key?)
+    (let [check (list 'has?
+                      (lower-expr (second form) environment)
+                      (lower-expr (third form) environment))]
+      (if (> (count form) 3)
+        (list '= (lower-expr (nth form 3) environment) check)
+        check))
+
+    (= operation 'x:obj-keys)
+    (list 'tahto.runtime.hara-support/object-keys
+          (lower-expr (second form) environment))
+
+    (= operation 'x:obj-clone)
+    (list 'tahto.runtime.hara-support/object-clone
+          (lower-expr (second form) environment))
+
+    (= operation 'x:arr-clone)
+    (list 'tahto.runtime.hara-support/array-clone
+          (lower-expr (second form) environment))
+
+    (= operation 'x:obj-assign)
+    (apply list
+           'merge
+           (map (fn [value]
+                  (lower-expr value environment))
+                (rest form)))
+
+    (= operation 'x:arr-map)
+    (list 'tahto.runtime.hara-support/array-map
+          (lower-expr (second form) environment)
+          (lower-expr (third form) environment))
+
+    (= operation 'x:arr-foldl)
+    (list 'reduce
+          (lower-expr (third form) environment)
+          (lower-expr (nth form 3) environment)
+          (lower-expr (second form) environment))
+
+    (= operation 'x:arr-foldr)
+    (list 'tahto.runtime.hara-support/fold-right
+          (lower-expr (second form) environment)
+          (lower-expr (third form) environment)
+          (lower-expr (nth form 3) environment))
+
+    (= operation 'x:apply)
+    (list 'apply
+          (lower-expr (second form) environment)
+          (lower-expr (third form) environment))
+
+    (= operation 'x:nil?)
+    (list 'nil? (lower-expr (second form) environment))
+
+    (= operation 'x:not-nil?)
+    (list 'tahto.runtime.hara-support/not-nil?
+          (lower-expr (second form) environment))
+
+    (has? +mutating-ops+ operation)
+    (lower-mutating-call operation form environment context)
+
+    (get +symbol-map+ operation)
+    (apply list
+           (get +symbol-map+ operation)
+           (map (fn [value]
+                  (lower-expr value environment))
+                (rest form)))
+
+    :else
+    (fail "XTalk operation is not yet implemented by the Hara target"
+          form context)))
+
+(defn lower-list
+  [form environment context]
+  (let [operation (canonical-op (first form))]
+    (cond
+      (= operation 'quote)
+      form
+
+      (or (= operation 'do)
+          (= operation 'do*)
+          (= operation 'block))
+      (lower-body (rest form) environment)
+
+      (= operation 'br*)
+      (lower-branches (rest form) environment context)
+
+      (= operation 'if)
+      (list 'if
+            (lower-expr (second form) environment)
+            (lower-expr (third form) environment)
+            (if (> (count form) 3)
+              (lower-expr (nth form 3) environment)
+              nil))
+
+      (= operation 'cond)
+      (lower-cond form environment)
+
+      (= operation 'let)
+      (let [bindings (second form)
+            declarations
+            (map (fn [pair]
+                   (list 'var (first pair) (second pair)))
+                 (partition 2 bindings))]
+        (lower-body (concat declarations (drop 2 form)) environment))
+
+      (= operation 'var)
+      (fail "var declarations are only valid within a Hara target body"
+            form context)
+
+      (has? +assignment-ops+ operation)
+      (lower-assignment operation
+                        (second form)
+                        (third form)
+                        environment context)
+
+      (= operation 'return)
+      (list 'tahto.runtime.hara-support/return!
+            (if (> (count form) 1)
+              (lower-expr (second form) environment)
+              nil))
+
+      (= operation 'break)
+      (list 'tahto.runtime.hara-support/break!
+            (if (> (count form) 1)
+              (lower-expr (second form) environment)
+              nil))
+
+      (= operation ':?)
+      (list 'if
+            (lower-expr (second form) environment)
+            (lower-expr (third form) environment)
+            (lower-expr (nth form 3) environment))
+
+      (or (= operation 'defn)
+          (= operation 'defn-)
+          (= operation 'defgen)
+          (= operation 'defabstract))
+      (lower-defn form environment context)
+
+      (= operation 'fn)
+      (lower-fn form environment context)
+
+      (or (= operation 'def)
+          (= operation 'defglobal))
+      (lower-def form environment context)
+
+      (= operation 'for)
+      (lower-for form environment context)
+
+      (= operation 'while)
+      (lower-while form environment)
+
+      (= operation 'try)
+      (lower-try form environment context)
+
+      (= operation 'throw)
+      (list 'throw (lower-expr (second form) environment))
+
+      (= operation 'await)
+      (list 'deref (lower-expr (second form) environment))
+
+      (= operation 'async)
+      (lower-expr (second form) environment)
+
+      (= operation '.)
+      (lower-access form environment context)
+
+      (and (symbol? operation)
+           (string/starts-with? (name operation) "x:"))
+      (lower-x-call operation form environment context)
+
+      :else
+      (apply list
+             (map (fn [value]
+                    (lower-expr value environment))
+                  form)))))
+
+(defn lower-expr
+  [form environment]
+  (let [context (or (get environment :context) {})]
+    (cond
+      (list? form)
+      (lower-list form environment context)
+
+      (vector? form)
+      (lower-vector form environment)
+
+      (map? form)
+      (lower-map form environment)
+
+      (set? form)
+      (lower-set form environment)
+
+      (symbol? form)
+      (lower-symbol form environment)
+
+      :else
+      form)))
+
+(defn lower-top
+  [form context]
+  (lower-expr form {:mutable #{}
+                    :context context}))
+
+(defn rewrite-hara-source
+  "Lowers canonical XTalk to one raw Hara source form before common emission."
+  [form context]
+  (list '-%%-
+        (pr-str (lower-top form context))))

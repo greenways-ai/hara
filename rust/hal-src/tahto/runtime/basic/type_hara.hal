@@ -1,0 +1,141 @@
+(ns tahto.runtime.basic.type-hara
+  (:require [std.foundation.promise :as promise]
+            [std.protocol.icontexteval :as context-eval]
+            [tahto.runtime.hara-support]))
+
+(defstruct RuntimeHaraBasic
+  [id lang runtime program target state profile timeout])
+
+(defn- default-id
+  [language]
+  (keyword (str (name language) ".basic")))
+
+(defn rt-hara:create
+  "Creates an in-process Hara runtime for the concrete :hara target.
+
+   The :xtalk language coordinate is accepted as a compatibility alias, but
+   source presented to this runtime is always concrete Hara source."
+  [options]
+  (let [language (or (get options :lang) :hara)
+        runtime (or (get options :runtime) :basic)
+        timeout (or (get options :timeout) 2000)]
+    (tahto.runtime.basic.type-hara/RuntimeHaraBasic
+     (or (get options :id) (default-id language))
+     language
+     runtime
+     :hara-self
+     :hara
+     (atom {:status :created
+            :target :hara
+            :evaluations 0})
+     {:input [] :source [] :response []}
+     timeout)))
+
+(defn rt-hara
+  [options]
+  (rt-hara:create options))
+
+(defn hara-state
+  [runtime]
+  (deref (get runtime :state)))
+
+(defn start-hara
+  [runtime]
+  (swap! (get runtime :state)
+         assoc
+         :status :started)
+  runtime)
+
+(defn stop-hara
+  [runtime]
+  (swap! (get runtime :state)
+         assoc
+         :status :stopped)
+  runtime)
+
+(defn- source-form
+  [source]
+  (if (string? source)
+    (read-string (str "(do\n" source "\n)"))
+    source))
+
+(defn eval-source-now
+  "Evaluates concrete Hara source inside the current Hara kernel instance."
+  [runtime source]
+  (if (not= :started (get (hara-state runtime) :status))
+    (throw
+     (ex-info "Hara basic runtime is not started"
+              {:phase :execute
+               :lang (get runtime :lang)
+               :target (get runtime :target)
+               :runtime (get runtime :runtime)
+               :program (get runtime :program)
+               :state (hara-state runtime)}))
+    (try
+      (let [result (eval (source-form source))]
+        (swap! (get runtime :state)
+               update
+               :evaluations
+               (fn [amount] (+ (or amount 0) 1)))
+        result)
+      (catch Throwable error
+        (throw
+         (ex-info "Self-hosted XTalk evaluation failed"
+                  {:phase :execute
+                   :lang (get runtime :lang)
+                   :target (get runtime :target)
+                   :runtime (get runtime :runtime)
+                   :program (get runtime :program)
+                   :source source
+                   :cause-data (ex-data error)}
+                  error))))))
+
+(defn- rejected
+  [error]
+  (promise/new
+   (fn [_ reject]
+     (reject error))))
+
+(defn eval-hara
+  "Promise-first self-hosted evaluation."
+  ([runtime source]
+   (eval-hara runtime source {}))
+  ([runtime source options]
+   (try
+     (promise/from (eval-source-now runtime source))
+     (catch Throwable error
+       (rejected error)))))
+
+(defn raw-eval-hara
+  "Blocking compatibility adapter for self-hosted evaluation."
+  [runtime source]
+  (eval-source-now runtime source))
+
+(extend-type RuntimeHaraBasic context-eval/IContextEval
+  (evaluate [runtime request options]
+    (eval-hara runtime request options))
+  (evaluate-raw [runtime request options]
+    (eval-hara runtime request options)))
+
+(extend-type RuntimeHaraBasic IContext
+  (call [runtime source]
+    (raw-eval-hara runtime source)))
+
+(extend-type RuntimeHaraBasic IComponent
+  (props [runtime]
+    {:state {:get (fn [] (hara-state runtime))}
+     :transport {:get (fn [] nil)}})
+  (status [runtime]
+    (get (hara-state runtime) :status))
+  (started? [runtime]
+    (= :started (get (hara-state runtime) :status)))
+  (stopped? [runtime]
+    (= :stopped (get (hara-state runtime) :status)))
+  (start [runtime]
+    (start-hara runtime))
+  (stop [runtime]
+    (stop-hara runtime))
+  (kill [runtime]
+    (stop-hara runtime))
+  (remote? [runtime]
+    false))

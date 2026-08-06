@@ -1,5 +1,6 @@
 (ns tahto.runtime.basic
-  (:require [tahto.runtime.basic.type-basic :as basic]
+  (:require [tahto.model.v1.spec-hara]
+            [tahto.runtime.basic.type-basic :as basic]
             [tahto.runtime.basic.type-oneshot :as oneshot]))
 
 (def rt-basic basic/rt-basic)
