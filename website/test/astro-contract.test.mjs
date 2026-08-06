@@ -22,14 +22,22 @@ test("publishes the dedicated maximum-resolution documentation card", async () =
   assert.match(config, /og:image:height", content: "630"/);
 });
 
-test("uses the compact ecosystem navigation and sign-in button", async () => {
+test("uses the compact ecosystem navigation and shared GitHub identity", async () => {
   const layout = await readFile(new URL("../src/layouts/SiteLayout.astro", import.meta.url), "utf8");
   const shell = await readFile(new URL("../src/styles/shell.css", import.meta.url), "utf8");
+  const config = await readFile(new URL("../astro.config.mjs", import.meta.url), "utf8");
+  const loader = await readFile(new URL("../public/assets/identity-loader.js", import.meta.url), "utf8");
   assert.match(layout, /Benchmarks[\s\S]*Docs[\s\S]*Specs/);
   assert.doesNotMatch(layout, />Source<\/a>/);
   assert.match(layout, /https:\/\/specs\.hara-lang\.org\//);
-  assert.ok(layout.includes('href="https://id.hara-lang.org/">Sign in</a>'));
-  assert.doesNotMatch(layout, /api\/session|auth\/github|return_to/);
+  assert.match(layout, /data-hara-identity/);
+  assert.match(layout, /identity-loader\.js/);
+  assert.doesNotMatch(layout, /href="https:\/\/id\.hara-lang\.org\/">Sign in<\/a>/);
+  assert.match(config, /hara-identity-auto/);
+  assert.match(config, /\/assets\/identity-loader\.js/);
+  assert.match(loader, /https:\/\/id\.hara-lang\.org/);
+  assert.match(loader, /https:\/\/id\.testing\.hara-lang\.org/);
+  assert.match(loader, /identity-client\.js/);
   assert.match(shell, /grid-template-columns: auto minmax\(0, 1fr\) auto/);
   assert.doesNotMatch(shell, /nav\s*\{[^}]*display:\s*none/);
 });
