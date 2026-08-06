@@ -1,5 +1,6 @@
 (ns lang.core.runtime
   (:require [std.protocol.icontexteval :as context-eval]
+            [lang.common.compat :as compat]
             [lang.core.eval :as evaluation]
             [lang.core.registry :as registry]))
 
@@ -52,7 +53,11 @@
    This keeps the Foundation [language runtime] coordinate and constructor
    shape while replacing JVM resource specs with portable immutable data."
   [language runtime spec]
-  (let [entry (merge {:lang language
+  (let [spec (compat/canonicalize-map spec)
+        spec (if (keyword? (:type spec))
+               (assoc spec :type (compat/canonical-key (:type spec)))
+               spec)
+        entry (merge {:lang language
                       :runtime runtime}
                      spec)]
     (swap! +type-registry+ assoc [language runtime] entry)

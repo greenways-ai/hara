@@ -55,7 +55,7 @@
 (defn to-staging-form [form grammar modules options deps-fragment walk-fn]
   (let [symbol (first form)
         reserved (get-in grammar [:reserved symbol])
-        options (provenance/with-provenance options {:tahto/form form :tahto/symbol symbol})
+        options (provenance/with-provenance options {:lang/form form :lang/symbol symbol})
         template-assignment (assign/process-template-assignment form grammar modules options)]
     (cond (= symbol '!:template) (walk-fn (eval (second form)))
           (has? '#{!:lang !:eval !:deref !:decorate} symbol)

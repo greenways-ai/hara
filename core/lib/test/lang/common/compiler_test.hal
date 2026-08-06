@@ -119,9 +119,21 @@
 (def compiled-v2
   (compiler/compile
    instance '(+ 1 2) selected-v2
-   {:tahto/actor :build/runner
-    :tahto/source :source/input-1
-    :tahto/work :artifact/output-1}))
+   {:lang/actor :build/runner
+    :lang/source :source/input-1
+    :lang/work :artifact/output-1}))
+
+(def legacy-actor-key (keyword "tahto/actor"))
+(def legacy-source-key (keyword "tahto/source"))
+(def legacy-work-key (keyword "tahto/work"))
+
+(def compiled-legacy
+  (compiler/compile
+   instance '(+ 1 2) selected-v1
+   (assoc {}
+          legacy-actor-key :build/legacy
+          legacy-source-key :source/legacy
+          legacy-work-key :artifact/legacy)))
 
 (def compiled-jsx
   (compiler/compile instance '(+ 1 2) selected-jsx))
@@ -177,7 +189,7 @@
      (compiler/compiler {:linter (FailingLinter)})
      '(+ 1 2)
      selected-v1
-     {:tahto/module 'demo.core})
+     {:lang/module 'demo.core})
     nil
     (catch Throwable error
       (ex-data error))))
@@ -222,12 +234,12 @@
        :rewrite/target :rewrite/staging :emit]])
 
 (fact "worklog preserves explicit attribution without inferring it"
-  [(get-in compiled-v2 [:provenance :tahto/actor])
-   (get-in compiled-v2 [:provenance :tahto/source])
-   (get-in compiled-v2 [:provenance :tahto/work])
+  [(get-in compiled-v2 [:provenance :lang/actor])
+   (get-in compiled-v2 [:provenance :lang/source])
+   (get-in compiled-v2 [:provenance :lang/work])
    (map (fn [event] (:index event))
         (get-in compiled-v2 [:provenance :events]))
-   (map (fn [event] (:tahto/actor event))
+   (map (fn [event] (:lang/actor event))
         (get-in compiled-v2 [:provenance :events]))]
   => [:build/runner
       :source/input-1
@@ -235,6 +247,20 @@
       [0 1 2 3 4 5 6 7]
       [:build/runner :build/runner :build/runner :build/runner
        :build/runner :build/runner :build/runner :build/runner]])
+
+(fact "legacy worklog metadata is read but canonical output is written"
+  [(get-in compiled-legacy [:provenance :lang/actor])
+   (get-in compiled-legacy [:provenance :lang/source])
+   (get-in compiled-legacy [:provenance :lang/work])
+   (contains? (:provenance compiled-legacy) legacy-actor-key)
+   (contains? (:provenance compiled-legacy) legacy-source-key)
+   (contains? (:provenance compiled-legacy) legacy-work-key)]
+  => [:build/legacy
+      :source/legacy
+      :artifact/legacy
+      false
+      false
+      false])
 
 (fact "entry hydration returns schema contributions without publishing"
   [(get-in entry-result [:entry :formatted])
@@ -253,15 +279,15 @@
 
 (fact "fatal phase errors retain stable context and causes"
   (let [data (captured-lint-error)]
-    [(:tahto/phase data)
-     (:tahto/error-code data)
+    [(:lang/phase data)
+     (:lang/error-code data)
      (:probe data)
-     (:tahto/module data)
-     (:tahto/grammar-coordinate data)
-     (map (fn [frame] (:tahto/phase frame))
-          (:tahto/provenance-stack data))])
+     (:lang/module data)
+     (:lang/grammar-coordinate data)
+     (map (fn [frame] (:lang/phase frame))
+          (:lang/provenance-stack data))])
   => [:lint
-      :tahto/error-lint
+      :lang/error-lint
       true
       'demo.core
       (:coordinate selected-v1)

@@ -100,7 +100,7 @@
                       '(!:eval (source-values)))]
        (enum/pg-enum form
                      (:grammar postgres/+selection+)
-                     {:tahto/eval-literal
+                     {:lang/eval-literal
                       (fn [form]
                         (if (= form '(source-values))
                           [:a :b]

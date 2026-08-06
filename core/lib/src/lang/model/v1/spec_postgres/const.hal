@@ -1,5 +1,6 @@
 (ns lang.model.v1.spec-postgres.const
   (:require [std.foundation.string :as string]
+            [lang.common.compat :as compat]
             [postgres.core.impl-base :as base]
             [postgres.core.impl-insert :as insert]
             [lang.common.emit :as emit]
@@ -116,11 +117,11 @@
 (defn- resolve-data
   [data context]
   (if (and (list? data) (= '!:eval (first data)))
-    (let [evaluator (or (:tahto/eval-literal context)
+    (let [evaluator (or (compat/read-key context :lang/eval-literal)
                         (:eval-literal context))]
       (if evaluator
         (evaluator (second data))
-        (throw (ex-info "PostgreSQL defconst !:eval requires :tahto/eval-literal"
+        (throw (ex-info "PostgreSQL defconst !:eval requires :lang/eval-literal"
                         {:form data}))))
     data))
 

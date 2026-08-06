@@ -33,7 +33,7 @@
         profile (if persistent?
                   {:input []
                    :source []
-                   :response [[:tahto/node-response 1]]}
+                   :response [[:lang/node-response 1]]}
                   {:input [] :source [] :response []})
         process (merge process
                        {:transport (if persistent? :process-socket :oneshot)

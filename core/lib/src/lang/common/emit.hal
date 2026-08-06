@@ -1,5 +1,6 @@
 (ns lang.common.emit
   (:require [std.foundation.string :as string]
+            [lang.common.compat :as compat]
             [lang.common.emit-helper :as helper]
             [lang.common.emit-preprocess :as preprocess]
             [lang.common.emit-rewrite :as rewrite]
@@ -513,7 +514,7 @@
 
 (def +option-keys+
   [:lang :entry :module :book :snapshot :layout :emit
-   :tahto/xtalk-context :tahto/provenance])
+   :lang/xtalk-context :lang/provenance])
 
 (defn emit-main-loop
   "emits one form through the Foundation common/top-level pipeline"
@@ -550,9 +551,10 @@
   ([form selected context]
    (emit-main form
               (default-grammar (or (:grammar selected) selected))
-              context))
+              (compat/canonicalize-map context)))
   ([form grammar namespace mopts]
-   (let [mopts (select-keys mopts +option-keys+)]
+   (let [mopts (select-keys (compat/canonicalize-map mopts)
+                            +option-keys+)]
      (if (:emit grammar)
        ((:emit grammar) form mopts)
        (emit-main form (default-grammar grammar) mopts)))))

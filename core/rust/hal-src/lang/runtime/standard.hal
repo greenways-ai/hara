@@ -154,7 +154,7 @@
     (if (= 0 (count path))
       (throw
        (ex-info "XTalk path assignment requires at least one key"
-                {:tahto/error-code :tahto.standard/empty-path}))
+                {:lang/error-code :lang.standard/empty-path}))
       (let [key (first path)]
         (if (= 1 (count path))
           (do

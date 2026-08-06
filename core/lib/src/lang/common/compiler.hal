@@ -1,5 +1,6 @@
 (ns lang.common.compiler
-  (:require [lang.common.emit :as emit]
+  (:require [lang.common.compat :as compat]
+            [lang.common.emit :as emit]
             [lang.common.preprocess-input :as input]
             [lang.common.preprocess-staging :as staging]
             [lang.common.provenance :as provenance]
@@ -45,7 +46,7 @@
   [entry value]
   (if (and (vector? value) (= 2 (count value)))
     (merge entry
-           (or (first value) {})
+           (compat/canonicalize-map (or (first value) {}))
            {:form-input (second value)})
     (assoc entry :form-input value)))
 
@@ -73,16 +74,16 @@
   [entry normalized value]
   (cond (and (map? value) (:form value))
         {:entry (merge entry
-                       (or (:metadata value) {})
-                       (or (:entry value) {}))
+                       (compat/canonicalize-map (or (:metadata value) {}))
+                       (compat/canonicalize-map (or (:entry value) {})))
          :form (:form value)
          :contributions (vec (or (:contributions value) []))}
 
         (and (vector? value) (= 2 (count value)))
-        (let [metadata (or (first value) {})]
+        (let [metadata (compat/canonicalize-map (or (first value) {}))]
           {:entry (merge entry metadata)
            :form (second value)
-           :contributions (vec (or (:tahto/contributions metadata) []))})
+           :contributions (vec (or (:lang/contributions metadata) []))})
 
         :else
         {:entry entry
@@ -121,7 +122,7 @@
                       (get-in context [:book :modules])
                       (:modules selected)
                       {})
-          options (dissoc context :tahto/provenance :tahto/provenance-stack)
+          options (dissoc context :lang/provenance :lang/provenance-stack)
           staged (staging/to-staging normalized grammar modules options)]
       {:form (nth staged 0)
        :dependencies {:code (nth staged 1)
@@ -149,7 +150,7 @@
            (assoc context
                   :grammar (:grammar selected)
                   :rewrite/phase phase
-                  :tahto/hook hook)))
+                  :lang/hook hook)))
    form
    (or (get-in selected [:rewrite phase]) [])))
 
@@ -191,27 +192,27 @@
 
 (defn- phase-error-code
   [phase]
-  (cond (= phase :format) :tahto/error-format
-        (= phase :normalize) :tahto/error-normalize
-        (= phase :hydrate) :tahto/error-hydrate
-        (= phase :stage) :tahto/error-stage
-        (= phase :rewrite/canonical) :tahto/error-rewrite-canonical
-        (= phase :infer) :tahto/error-infer
-        (= phase :lint) :tahto/error-lint
-        (= phase :rewrite/target) :tahto/error-rewrite-target
-        (= phase :rewrite/staging) :tahto/error-rewrite-staging
-        (= phase :emit) :tahto/error-emit
-        (= phase :publish) :tahto/error-publish
-        :else :tahto/error-compiler))
+  (cond (= phase :format) :lang/error-format
+        (= phase :normalize) :lang/error-normalize
+        (= phase :hydrate) :lang/error-hydrate
+        (= phase :stage) :lang/error-stage
+        (= phase :rewrite/canonical) :lang/error-rewrite-canonical
+        (= phase :infer) :lang/error-infer
+        (= phase :lint) :lang/error-lint
+        (= phase :rewrite/target) :lang/error-rewrite-target
+        (= phase :rewrite/staging) :lang/error-rewrite-staging
+        (= phase :emit) :lang/error-emit
+        (= phase :publish) :lang/error-publish
+        :else :lang/error-compiler))
 
 (defn- phase-context
   [context selected phase]
   (provenance/with-provenance
    (assoc context
           :compiler/phase phase
-          :tahto/phase phase
-          :tahto/grammar-coordinate (:coordinate selected)
-          :tahto/grammar-fingerprint (:fingerprint selected))
+          :lang/phase phase
+          :lang/grammar-coordinate (:coordinate selected)
+          :lang/grammar-fingerprint (:fingerprint selected))
    context))
 
 (defn- run-phase
@@ -222,7 +223,7 @@
       (catch Throwable error
         (provenance/throw-with-provenance
          (str "Tahto compiler phase failed: " (name phase))
-         (assoc current :tahto/error-code (phase-error-code phase))
+         (assoc current :lang/error-code (phase-error-code phase))
          error)))))
 
 (defn- normalize-dependencies
@@ -243,7 +244,7 @@
 
 (defn- worklog-fields
   [context]
-  (select-keys context [:tahto/actor :tahto/source :tahto/work]))
+  (select-keys context [:lang/actor :lang/source :lang/work]))
 
 (defn- worklog-event
   [index phase value context]
@@ -325,7 +326,7 @@
      :stages stages
      :provenance
      (merge
-      {:grammar (:provenance selected)
+      {:grammar (compat/canonicalize-map (:provenance selected))
        :events events
        :phases events}
       (worklog-fields context))}))
@@ -363,7 +364,8 @@
 
 (extend-type Compiler protocol/ICompiler
   (compile-form [compiler raw selected context]
-    (let [normalized
+    (let [context (compat/canonicalize-map context)
+          normalized
           (run-phase
            :normalize selected context
            (fn [current]
@@ -374,16 +376,18 @@
 
 (extend-type Compiler protocol/IEntryCompiler
   (compile-entry [compiler entry selected context]
-    (let [formatted
+    (let [entry (compat/canonicalize-map entry)
+          context (compat/canonicalize-map context)
+          formatted
           (run-phase
-           :format selected (assoc context :tahto/entry entry)
+           :format selected (assoc context :lang/entry entry)
            (fn [current]
              (protocol/format-entry (:formatter compiler)
                                     entry selected current)))
           events [(worklog-event 0 :format formatted context)]
           normalized
           (run-phase
-           :normalize selected (assoc context :tahto/entry formatted)
+           :normalize selected (assoc context :lang/entry formatted)
            (fn [current]
              (protocol/normalize-form (:normalizer compiler)
                                       (:form-input formatted)
@@ -391,7 +395,7 @@
           events (append-event events :normalize normalized context)
           hydrated
           (run-phase
-           :hydrate selected (assoc context :tahto/entry formatted)
+           :hydrate selected (assoc context :lang/entry formatted)
            (fn [current]
              (protocol/hydrate-entry (:hydrator compiler)
                                      formatted normalized selected current)))
@@ -402,7 +406,7 @@
           result
           (compile-staged
            compiler selected
-           (assoc context :tahto/entry hydrated-entry)
+           (assoc context :lang/entry hydrated-entry)
            {:raw entry
             :formatted formatted
             :normalized normalized
@@ -447,10 +451,11 @@
   ([publisher compiled]
    (publish publisher compiled {}))
   ([publisher compiled context]
-   (let [selected (:grammar compiled)
-         entry (:entry compiled)
+   (let [context (compat/canonicalize-map context)
+         selected (:grammar compiled)
+         entry (compat/canonicalize-map (:entry compiled))
          contributions (:contributions compiled)]
      (run-phase
-      :publish selected (assoc context :tahto/entry entry)
+      :publish selected (assoc context :lang/entry entry)
       (fn [current]
         (protocol/publish-entry publisher entry contributions current))))))

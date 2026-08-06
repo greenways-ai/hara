@@ -18,8 +18,8 @@
    (:type (runtime/runtime-spec :hara :basic))]
   => ['lang.runtime.basic.impl.process-xtalk
       'lang.runtime.basic.impl.process-xtalk
-      :tahto/rt.hara-basic
-      :tahto/rt.hara-basic])
+      :lang/rt.hara-basic
+      :lang/rt.hara-basic])
 
 ^{:refer lang.runtime.basic.type-hara/raw-eval-hara-basic :added "4.1"}
 (fact "persists Hara Vars inside one runtime namespace without a child process"

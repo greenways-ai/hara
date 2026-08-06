@@ -29,8 +29,8 @@ core/rust/hal-src/tahto -> core/rust/hal-src/lang
 - `lang.*` is the only compiler and language-authoring API after the change.
 - No forwarding `tahto.*` namespaces are added.
 - `xt.*` and `postgres.*` namespace names do not change.
-- Serialized data vocabulary such as `:tahto/error-code`, `:tahto/phase`, and
-  `:tahto/provenance` does not change in this structural migration.
+- Serialized data vocabulary was deliberately deferred from this structural
+  migration and is moved by HARA-2; see `plans/lang-metadata-migration.md`.
 - Historical Foundation paths such as `src/tahto/...` remain valid upstream
   references even though local target paths become `lib/src/lang/...`.
 

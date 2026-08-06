@@ -3,7 +3,7 @@
 
 (declare lower lower-body)
 
-(def +not-handled+ :tahto.hara/not-handled)
+(def +not-handled+ :lang.hara/not-handled)
 
 (defn form
   [values]
@@ -181,7 +181,7 @@
                (list 'if
                      (list '= true
                            (list 'get '__tahto_return_data
-                                 :tahto.hara/return))
+                                 :lang.hara/return))
                      (list 'get '__tahto_return_data :value)
                      (list 'throw '__tahto_return_error))))))
 
@@ -250,7 +250,7 @@
       (list 'throw
             (list 'ex-info
                   "XTalk function return"
-                  {:tahto.hara/return true
+                  {:lang.hara/return true
                    :value result}))
       result)))
 
@@ -294,7 +294,7 @@
     (throw
      (ex-info "Unsupported Hara assignment target"
               {:target target
-               :tahto/error-code :tahto.hara/unsupported-assignment}))))
+               :lang/error-code :lang.hara/unsupported-assignment}))))
 
 (defn lower-index
   [value context]
@@ -701,7 +701,7 @@
         (throw
          (ex-info "XTalk var must occur within a body"
                   {:form value
-                   :tahto/error-code :tahto.hara/unscoped-var}))
+                   :lang/error-code :lang.hara/unscoped-var}))
         (and (symbol? operation)
              (not (namespace operation))
              (string/starts-with? (name operation) "x:"))
@@ -709,7 +709,7 @@
          (ex-info "XTalk operation is not implemented by the Hara target"
                   {:operation operation
                    :form value
-                   :tahto/error-code :tahto.hara/unsupported-operation}))
+                   :lang/error-code :lang.hara/unsupported-operation}))
         :else
         (form (concat [(lower operation context)]
                       (map #(lower % context) (rest value))))))))

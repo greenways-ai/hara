@@ -45,21 +45,21 @@
 (def +python-oneshot+
   (runtime/install-type!
    :python :oneshot
-   {:type :tahto/rt.oneshot
+   {:type :lang/rt.oneshot
     :instance {:create oneshot/rt-oneshot:create
                :raw-eval oneshot/raw-eval-oneshot}}))
 
 (def +python-verify+
   (runtime/install-type!
    :python :verify
-   {:type :tahto/rt.verify
+   {:type :lang/rt.verify
     :instance {:create oneshot/rt-oneshot:create
                :raw-eval verify/raw-eval-verify}}))
 
 (def +python-basic+
   (runtime/install-type!
    :python :basic
-   {:type :tahto/rt.basic
+   {:type :lang/rt.basic
     :config {:layout :full}
     :instance {:create basic/rt-basic:create
                :start basic/start-basic

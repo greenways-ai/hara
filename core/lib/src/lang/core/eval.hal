@@ -1,5 +1,6 @@
 (ns lang.core.eval
   (:require [std.foundation.promise :as promise]
+            [lang.common.compat :as compat]
             [std.protocol.icontexteval :as context-eval]
             [lang.protocol.runtime :as transport]))
 
@@ -12,7 +13,8 @@
 (defn register-plugin!
   "Registers a reusable, versioned evaluation phase function."
   [id version phase transform]
-  (let [plugin {:id id
+  (let [id (compat/canonical-key id)
+        plugin {:id id
                 :version version
                 :phase phase
                 :transform transform}]
@@ -21,11 +23,12 @@
 
 (defn plugin
   [coordinate]
-  (or (get (deref +plugins+) coordinate)
-      (throw
-       (ex-info "Evaluation plugin is not registered"
-                {:plugin coordinate
-                 :registered (keys (deref +plugins+))}))))
+  (let [coordinate (compat/canonical-coordinate coordinate)]
+    (or (get (deref +plugins+) coordinate)
+        (throw
+         (ex-info "Evaluation plugin is not registered"
+                  {:plugin coordinate
+                   :registered (keys (deref +plugins+))}))))
 
 (defn request
   ([input]
@@ -136,7 +139,7 @@
   ([pending]
    (await pending 2000))
   ([pending timeout]
-   (let [marker :tahto.eval/timeout
+   (let [marker :lang.eval/timeout
          value (IDerefTimeout/deref-timeout pending timeout marker)]
      (if (= marker value)
        (do
