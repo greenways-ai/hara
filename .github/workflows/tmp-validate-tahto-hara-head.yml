@@ -1,0 +1,30 @@
+name: Validate current self-hosted Hara head
+
+on:
+  push:
+    branches:
+      - agent/tahto-hara-self-host
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+          cache-dependency-path: java/pom.xml
+      - name: Verify canonical and Rust HAL mirrors
+        run: ./scripts/sync-rust-hal-src --check
+      - name: Run focused self-hosted target suite
+        run: >-
+          mvn -B -Ptruffle
+          -Dtest=hara.portable.HaraXtalkSelfHostedTest
+          test --file java/pom.xml
