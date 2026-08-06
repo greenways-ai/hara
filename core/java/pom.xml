@@ -153,6 +153,12 @@
 					<include>**/*.hal</include>
 				</includes>
 			</resource>
+			<resource>
+				<directory>${project.basedir}/../lib/src-lang</directory>
+				<includes>
+					<include>**/*.hal</include>
+				</includes>
+			</resource>
 		</resources>
 		<testResources>
 			<testResource>
@@ -160,6 +166,12 @@
 			</testResource>
 			<testResource>
 				<directory>${project.basedir}/../lib/test</directory>
+				<includes>
+					<include>**/*.hal</include>
+				</includes>
+			</testResource>
+			<testResource>
+				<directory>${project.basedir}/../lib/test-lang</directory>
 				<includes>
 					<include>**/*.hal</include>
 				</includes>
