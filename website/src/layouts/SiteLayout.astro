@@ -44,6 +44,7 @@ const socialImage = new URL(image, Astro.site);
     <link rel="stylesheet" href="/assets/install-copy.css" />
     <title>{title}</title>
     <script is:inline src="/assets/install-copy.js" defer></script>
+    <script is:inline src="/assets/identity-loader.js" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -54,7 +55,9 @@ const socialImage = new URL(image, Astro.site);
         <a href="https://specs.hara-lang.org/">Specs</a>
       </nav>
       <div class="header-actions">
-        <a class="sign-in" href="https://id.hara-lang.org/">Sign in</a>
+        <div data-hara-identity>
+          <a class="sign-in" data-hara-identity-fallback href="https://id.hara-lang.org/" aria-label="Sign in with GitHub">Sign in</a>
+        </div>
         <ThemeToggle />
       </div>
     </header>
