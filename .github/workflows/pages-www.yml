@@ -58,6 +58,7 @@ jobs:
           ref: 320aed54f40d4d85d3140fdc67b13144516bea58
           path: website/hara-www
           fetch-depth: 1
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: 22
