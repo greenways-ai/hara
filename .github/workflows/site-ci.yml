@@ -6,6 +6,7 @@ on:
       - "benchmarks/**"
       - "core/lib/bench/**"
       - "packages/visual-language/**"
+      - "packaging/scripts/build-www"
       - "packaging/scripts/install-benchmark-site"
       - ".github/scripts/verify-benchmark-observatory.sh"
       - ".github/workflows/site-ci.yml"
@@ -32,12 +33,28 @@ jobs:
           ref: benchmark-site
           path: .benchmark-site
           fetch-depth: 1
-      - name: Checkout hara-www
+      - name: Checkout reviewed hara-docs release
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-docs
+          ref: 563edc868ebd3bca018f6102f706a6600b5d0722
+          path: website/docs
+          fetch-depth: 1
+      - name: Checkout reviewed visual-language release
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/visual-language
+          ref: a4db9548bdcad7887824890b0bb259da26e402c7
+          path: packages/visual-language
+          fetch-depth: 1
+      - name: Checkout reviewed hara-www popup release
         uses: actions/checkout@v4
         with:
           repository: hara-lang/hara-www
+          ref: 320aed54f40d4d85d3140fdc67b13144516bea58
           path: website/hara-www
           fetch-depth: 1
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -60,7 +77,7 @@ jobs:
           grep -F 'id="class-comparison"' core/target/benchmarks/index.html
           grep -F 'id="language-shootout"' core/target/benchmarks/index.html
           grep -F 'rust-prepared' core/target/benchmarks/index.html
-      - name: Validate main Hara site
+      - name: Validate reviewed main Hara site
         run: |
           npm test --prefix website/hara-www
           npm run build --prefix website/hara-www
