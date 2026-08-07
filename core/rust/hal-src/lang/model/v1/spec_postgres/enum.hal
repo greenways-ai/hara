@@ -1,5 +1,6 @@
 (ns lang.model.v1.spec-postgres.enum
   (:require [std.foundation.string :as string]
+            [lang.common.compat :as compat]
             [lang.common.grammar-spec :as grammar-spec]
             [lang.model.v1.spec-postgres.deftype.common :as table]))
 
@@ -54,7 +55,7 @@
    deterministic literal evaluator capability."
   [values context]
   (if (and (list? values) (= '!:eval (first values)))
-    (let [evaluator (or (:tahto/eval-literal context)
+    (let [evaluator (or (compat/read-key context :lang/eval-literal)
                         (:eval-literal context))]
       (if evaluator
         (let [resolved (evaluator (second values))]
@@ -63,7 +64,7 @@
             (throw (ex-info "PostgreSQL enum evaluator returned a non-sequence"
                             {:value resolved
                              :form values}))))
-        (throw (ex-info "PostgreSQL enum !:eval requires :tahto/eval-literal"
+        (throw (ex-info "PostgreSQL enum !:eval requires :lang/eval-literal"
                         {:form values}))))
     (if (sequential? values)
       (vec values)

@@ -1,0 +1,10 @@
+{:tahto/phase :lint
+ :tahto/error-code :tahto/error-lint
+ :tahto/grammar-coordinate [:js 1]
+ :tahto/provenance
+ {:tahto/module demo.core
+  :tahto/line 42}
+ :profile [[:tahto/node-response 1]]
+ :runtime {:type :tahto/rt.basic}
+ :target {:error/type :tahto/target}
+ :hara-return {:tahto.hara/return true}}

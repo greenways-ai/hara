@@ -1,0 +1,88 @@
+(ns lang.common.compat
+  (:require [std.foundation.string :as string]))
+
+(def +legacy-root+ "tahto")
+(def +canonical-root+ "lang")
+
+(defn- language-namespace?
+  [value root]
+  (and value
+       (or (= value root)
+           (string/starts-with? value (str root ".")))))
+
+(defn- replace-root
+  [value source target]
+  (if (= value source)
+    target
+    (str target (string/slice value (count source)))))
+
+(defn canonical-key
+  "Moves one legacy language keyword to its canonical :lang namespace.
+
+   Non-keywords, application keywords, and already-canonical keys are returned
+   unchanged. Legacy keys are constructed dynamically by compatibility callers;
+   production source never writes the reserved legacy vocabulary."
+  [value]
+  (let [key-namespace (if (keyword? value) (namespace value) nil)]
+    (if (language-namespace? key-namespace +legacy-root+)
+      (keyword
+       (str (replace-root key-namespace +legacy-root+ +canonical-root+)
+            "/"
+            (name value)))
+      value)))
+
+(defn legacy-key
+  "Returns the one-release legacy spelling for a canonical language keyword."
+  [value]
+  (let [key-namespace (if (keyword? value) (namespace value) nil)]
+    (if (language-namespace? key-namespace +canonical-root+)
+      (keyword
+       (str (replace-root key-namespace +canonical-root+ +legacy-root+)
+            "/"
+            (name value)))
+      value)))
+
+(defn read-key
+  "Reads the canonical key first, then its legacy spelling for one release."
+  ([m key]
+   (read-key m key nil))
+  ([m key fallback]
+   (if (and (map? m) (contains? m key))
+     (get m key)
+     (let [legacy (legacy-key key)]
+       (if (and (map? m)
+                (not= legacy key)
+                (contains? m legacy))
+         (get m legacy)
+         fallback)))))
+
+(defn canonicalize-map
+  "Canonicalizes only the top-level keys of a language metadata map.
+
+   Values are deliberately left untouched so source forms and application data
+   are never rewritten merely because they contain a legacy-looking keyword.
+   When both spellings are present, the canonical value wins."
+  [value]
+  (if (map? value)
+    (reduce-kv
+     (fn [out key item]
+       (let [canonical (canonical-key key)]
+         (if (and (not= key canonical)
+                  (contains? value canonical))
+           out
+           (assoc out canonical item))))
+     {}
+     value)
+    value))
+
+(defn canonical-coordinate
+  "Canonicalizes a keyword coordinate or the keyword head of a vector."
+  [value]
+  (cond
+    (keyword? value)
+    (canonical-key value)
+
+    (and (vector? value) (> (count value) 0))
+    (assoc value 0 (canonical-key (first value)))
+
+    :else value))

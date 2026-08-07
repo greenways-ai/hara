@@ -267,7 +267,7 @@
                    form
                    (:grammar postgres/+selection+)
                    (assoc (module-context)
-                          :tahto/eval-literal
+                          :lang/eval-literal
                           (fn [source]
                             (if (= source '(source-account))
                               {:id "dynamic"

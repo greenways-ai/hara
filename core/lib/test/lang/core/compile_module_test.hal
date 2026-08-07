@@ -125,7 +125,7 @@
              :layout :module})]
        [(diagnostic-codes result)
         (get-in result [:diagnostics 0 :data])])
-     => [[:tahto/missing-entry]
+     => [[:lang/missing-entry]
          {:entry 'demo.root/a
           :dependency 'demo.root/missing}])
 
@@ -153,7 +153,7 @@
         (diagnostic-codes result)
         (get-in result [:diagnostics 0 :data :modules])])
      => [['demo.a 'demo.b]
-         [:tahto/module-cycle]
+         [:lang/module-cycle]
          ['demo.a 'demo.b]])
 
    (fact "conflicting schema definitions name both modules"
@@ -178,7 +178,7 @@
              :layout :module})]
        [(diagnostic-codes result)
         (get-in result [:diagnostics 0 :data])])
-     => [[:tahto/conflicting-schema]
+     => [[:lang/conflicting-schema]
          {:schema :ledger
           :module 'demo.base
           :previous-module 'demo.dep}])
@@ -202,7 +202,7 @@
         (diagnostic-codes result)
         (get-in result [:diagnostics 0 :data :entries])])
      => [['demo.root/b 'demo.root/a]
-         [:tahto/entry-cycle]
+         [:lang/entry-cycle]
          ['demo.root/b 'demo.root/a]])
 
    (fact "unsupported entries stay represented and do not write output"
@@ -229,6 +229,6 @@
      => [""
          ['demo.root/bad]
          [nil]
-         [:tahto/unsupported-form]])])
+         [:lang/unsupported-form]])])
 
 (pr-str (run '[lang.core.compile-module-test]))

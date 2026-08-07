@@ -39,21 +39,21 @@
 (def +lua-oneshot+
   (runtime/install-type!
    :lua :oneshot
-   {:type :tahto/rt.oneshot
+   {:type :lang/rt.oneshot
     :instance {:create oneshot/rt-oneshot:create
                :raw-eval oneshot/raw-eval-oneshot}}))
 
 (def +lua-verify+
   (runtime/install-type!
    :lua :verify
-   {:type :tahto/rt.verify
+   {:type :lang/rt.verify
     :instance {:create oneshot/rt-oneshot:create
                :raw-eval verify/raw-eval-verify}}))
 
 (def +lua-basic+
   (runtime/install-type!
    :lua :basic
-   {:type :tahto/rt.basic
+   {:type :lang/rt.basic
     :config {:layout :full}
     :instance {:create basic/rt-basic:create
                :start basic/start-basic

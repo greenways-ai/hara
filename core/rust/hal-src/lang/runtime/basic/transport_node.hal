@@ -77,7 +77,7 @@
         (= lang :python) (python-source port)
         (= lang :lua) (lua-source port)
         :else (throw (ex-info "Persistent basic transport is unavailable"
-                              {:error/type :tahto/runtime-unavailable
+                              {:error/type :lang/runtime-unavailable
                                :lang lang}))))
 
 (defn create
@@ -111,7 +111,7 @@
       (= kind :error)
       (throw
        (ex-info "Process transport socket failed"
-                {:error/type :tahto/transport
+                {:error/type :lang/transport
                  :lang (get node :lang)
                  :error (get event :error)}))
       :else
@@ -133,7 +133,7 @@
                (evaluation/await (os/process-stderr child) 1000))
               (catch Throwable ignored nil))
             nil)
-          data {:error/type :tahto/runtime-start
+          data {:error/type :lang/runtime-start
                 :lang (get node :lang)
                 :argv (get node :exec)
                 :timeout (get node :timeout)
@@ -220,14 +220,14 @@
         (= kind :error)
         (throw
          (ex-info "Process transport socket failed"
-                  {:error/type :tahto/transport
+                  {:error/type :lang/transport
                    :lang (get node :lang)
                    :error (get event :error)}))
 
         (= kind :close)
         (throw
          (ex-info "Process transport closed before a response"
-                  {:error/type :tahto/transport
+                  {:error/type :lang/transport
                    :lang (get node :lang)
                    :process (get (state node) :process)}))
 
@@ -239,7 +239,7 @@
   (if-not (started? node)
     (throw
      (ex-info "Process transport is not started"
-              {:error/type :tahto/transport
+              {:error/type :lang/transport
                :lang (get node :lang)
                :state (state node)}))
     (let [id (get (swap! (get node :state) update :next-id inc) :next-id)
@@ -254,7 +254,7 @@
         (if (not= id response-id)
           (throw
            (ex-info "Process transport response id mismatch"
-                    {:error/type :tahto/transport
+                    {:error/type :lang/transport
                      :lang (get node :lang)
                      :expected id
                      :actual response-id
@@ -302,7 +302,7 @@
         (throw
          (ex-info (or (wire-get error :message)
                       "Target evaluation failed")
-                  {:error/type :tahto/target
+                  {:error/type :lang/target
                    :target (get-in frame [:context :lang])
                    :target-source-tail (vec (take-last 4
                                             (string/split-lines
@@ -311,4 +311,4 @@
 
 (def +response-plugin+
   (evaluation/register-plugin!
-   :tahto/node-response 1 :response response-plugin))
+   :lang/node-response 1 :response response-plugin))

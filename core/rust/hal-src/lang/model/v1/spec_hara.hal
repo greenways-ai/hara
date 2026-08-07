@@ -56,8 +56,8 @@
     (hara-emit/emit-form
      rewritten
      (assoc context
-            :tahto/grammar-coordinate (:coordinate selected)
-            :tahto/grammar-fingerprint (:fingerprint selected)))))
+            :lang/grammar-coordinate (:coordinate selected)
+            :lang/grammar-fingerprint (:fingerprint selected)))))
 
 (defn emitter
   []

@@ -7,9 +7,14 @@ on:
       - 'core/lib/src-lang/**'
       - 'core/lib/test/**'
       - 'core/lib/test-lang/**'
+      - 'core/lib/integration/**'
+      - 'core/java/src/**'
+      - 'core/rust/hal-src/lang/**'
+      - 'core/spec/fixtures/lang-metadata-v1/**'
       - 'core/project.edn'
       - 'core/lib/project.hal'
       - 'packaging/scripts/check-language-source-layout'
+      - 'packaging/scripts/check-no-tahto-language-metadata'
       - '.github/workflows/language-source-layout.yml'
   pull_request:
     branches: [main]
@@ -18,9 +23,14 @@ on:
       - 'core/lib/src-lang/**'
       - 'core/lib/test/**'
       - 'core/lib/test-lang/**'
+      - 'core/lib/integration/**'
+      - 'core/java/src/**'
+      - 'core/rust/hal-src/lang/**'
+      - 'core/spec/fixtures/lang-metadata-v1/**'
       - 'core/project.edn'
       - 'core/lib/project.hal'
       - 'packaging/scripts/check-language-source-layout'
+      - 'packaging/scripts/check-no-tahto-language-metadata'
       - '.github/workflows/language-source-layout.yml'
   workflow_dispatch:
 
@@ -38,3 +48,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate source roots, namespaces, and duplicates
         run: python3 packaging/scripts/check-language-source-layout
+      - name: Reserve legacy Tahto keywords for the fabric
+        run: python3 packaging/scripts/check-no-tahto-language-metadata

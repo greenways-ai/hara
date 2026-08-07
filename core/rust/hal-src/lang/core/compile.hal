@@ -7,6 +7,7 @@
 ;; ============================================================================
 (ns lang.core.compile
   (:require [std.foundation.string :as string]
+            [lang.common.compat :as compat]
             [lang.common.compiler :as compiler]
             [lang.core.registry :as registry]
             [lang.core.script :as script]))
@@ -72,7 +73,7 @@
                modules
                (conj diagnostics
                      (diagnostic
-                      :tahto/module-load-failed
+                      :lang/module-load-failed
                       "Tahto module could not be loaded"
                       {:module module-id})))
 
@@ -83,7 +84,7 @@
                modules
                (conj diagnostics
                      (diagnostic
-                      :tahto/missing-module
+                      :lang/missing-module
                       "Loaded Tahto namespace did not register a module"
                       {:module module-id})))
 
@@ -125,7 +126,7 @@
              :diagnostics
              (conj diagnostics
                    (diagnostic
-                    :tahto/module-cycle
+                    :lang/module-cycle
                     "Tahto module dependency cycle"
                     {:modules cycle}))})
           (recur
@@ -167,7 +168,7 @@
               :diagnostics
               conj
               (diagnostic
-               :tahto/conflicting-schema
+               :lang/conflicting-schema
                "Tahto schema definition conflicts with an earlier module"
                {:schema schema-id
                 :module module-id
@@ -286,11 +287,12 @@
    (map
     (fn [value]
       (if (map? value)
-        (if (:entry value)
-          value
-          (assoc value :entry qualified))
+        (let [value (compat/canonicalize-map value)]
+          (if (:entry value)
+            value
+            (assoc value :entry qualified)))
         (diagnostic
-         :tahto/compiler-diagnostic
+         :lang/compiler-diagnostic
          "Tahto compiler returned a non-map diagnostic"
          {:entry qualified
           :value (str value)})))
@@ -337,7 +339,7 @@
            :diagnostics diagnostics}
           (let [problem
                 (diagnostic
-                 :tahto/unsupported-form
+                 :lang/unsupported-form
                  "Tahto entry compiler did not return string output"
                  {:entry qualified
                   :module (:module entry)})]
@@ -346,7 +348,7 @@
       (catch Throwable error
         (let [problem
               (diagnostic
-               :tahto/unsupported-form
+               :lang/unsupported-form
                "Tahto entry compilation failed"
                {:entry qualified
                 :module (:module entry)})]
@@ -394,7 +396,7 @@
         (map
          (fn [dependency]
            (diagnostic
-            :tahto/missing-entry
+            :lang/missing-entry
             "Tahto code dependency is not registered"
             {:entry (:symbol entry)
              :dependency dependency}))
@@ -475,7 +477,7 @@
                :diagnostics
                (conj diagnostics
                      (diagnostic
-                      :tahto/entry-cycle
+                      :lang/entry-cycle
                       "Tahto entry dependency cycle"
                       {:entries (vec (map :symbol cycle))}))})
             (recur
@@ -565,7 +567,7 @@
    :entries []
    :diagnostics
    [(diagnostic
-     :tahto/invalid-options
+     :lang/invalid-options
      "compile-module requires :lang and a symbolic :main module"
      {:lang (:lang options)
       :main (:main options)})]

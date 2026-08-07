@@ -5,7 +5,7 @@
 (def +xtalk-basic+
   (runtime/install-type!
    :xtalk :basic
-   {:type :tahto/rt.hara-basic
+   {:type :lang/rt.hara-basic
     :config {:target :hara
              :transport :in-process}
     :instance {:create hara-basic/rt-hara-basic:create
@@ -16,7 +16,7 @@
 (def +hara-basic+
   (runtime/install-type!
    :hara :basic
-   {:type :tahto/rt.hara-basic
+   {:type :lang/rt.hara-basic
     :config {:target :hara
              :transport :in-process}
     :instance {:create hara-basic/rt-hara-basic:create

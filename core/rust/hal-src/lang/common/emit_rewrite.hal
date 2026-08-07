@@ -1,4 +1,5 @@
-(ns lang.common.emit-rewrite)
+(ns lang.common.emit-rewrite
+  (:require [lang.common.compat :as compat]))
 
 (defn stage-transforms
   "returns rewrite transforms for a compile stage"
@@ -109,7 +110,7 @@
   {:added "4.1"}
   [form context]
   (let [mopts (:mopts context)
-        explicit (:tahto/xtalk-context mopts)
+        explicit (compat/read-key mopts :lang/xtalk-context)
         module (:module mopts)
         inferred-context (or explicit (xtalk-context mopts))
         inferred-context (if (and inferred-context (contains-dot? form))

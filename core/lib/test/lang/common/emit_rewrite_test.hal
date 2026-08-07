@@ -14,7 +14,7 @@
 (fact "lowers typed and keyed XTalk access forms"
   (rewrite/canonical-stage
    '(. arr [i])
-   {:mopts {:tahto/xtalk-context
+   {:mopts {:lang/xtalk-context
             {:env {'arr {:kind :array
                          :item {:kind :primitive :name :xt/int}}}}}})
   => '(x:get-idx arr i)

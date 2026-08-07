@@ -1,0 +1,50 @@
+(ns lang.common.compat-test
+  (:use code.test)
+  (:require [lang.common.compat :as compat]))
+
+(def legacy-phase (keyword "tahto/phase"))
+(def legacy-error (keyword "tahto/error-code"))
+(def legacy-return (keyword (str "tahto" ".hara/return")))
+(def legacy-plugin (keyword "tahto/node-response"))
+
+(fact "legacy language keywords canonicalize without a literal legacy writer"
+  [(compat/canonical-key legacy-phase)
+   (compat/canonical-key legacy-return)
+   (compat/canonical-key :lang/phase)
+   (compat/canonical-key :application/phase)]
+  => [:lang/phase
+      :lang.hara/return
+      :lang/phase
+      :application/phase])
+
+(fact "canonical keys win when both metadata spellings are present"
+  (let [source-form (list 'quote legacy-phase)
+        input (assoc {:lang/phase :canonical
+                      :form source-form}
+                     legacy-phase :legacy
+                     legacy-error :legacy-error)
+        output (compat/canonicalize-map input)]
+    [(:lang/phase output)
+     (:lang/error-code output)
+     (contains? output legacy-phase)
+     (contains? output legacy-error)
+     (:form output)])
+  => [:canonical
+      :legacy-error
+      false
+      false
+      (list 'quote legacy-phase)])
+
+(fact "read compatibility prefers canonical metadata and falls back once"
+  [(compat/read-key {:lang/phase :canonical} :lang/phase)
+   (compat/read-key (assoc {} legacy-phase :legacy) :lang/phase)
+   (compat/read-key {} :lang/phase :missing)]
+  => [:canonical :legacy :missing])
+
+(fact "versioned plugin coordinates accept the legacy keyword head"
+  [(compat/canonical-coordinate [legacy-plugin 1])
+   (compat/canonical-coordinate :lang/node-response)]
+  => [[:lang/node-response 1]
+      :lang/node-response])
+
+(run {:namespace "lang.common.compat-test"})

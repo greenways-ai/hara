@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Run the HARA-2 generator with repository-specific boundary patches."""
+
+from __future__ import annotations
+
+import runpy
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+GENERATOR = ROOT / "packaging/scripts/migrate-tahto-metadata-to-lang"
+module = runpy.run_path(str(GENERATOR))
+replace_once = module["replace_once"]
+
+
+def patch_common_compiler() -> None:
+    path = "core/lib/src/lang/common/compiler.hal"
+    replace_once(
+        path,
+        "(:require [lang.common.emit :as emit]",
+        "(:require [lang.common.compat :as compat]\n            [lang.common.emit :as emit]",
+    )
+    replace_once(
+        path,
+        "    (merge entry\n           (or (first value) {})\n           {:form-input (second value)})",
+        "    (merge entry\n           (compat/canonicalize-map (or (first value) {}))\n           {:form-input (second value)})",
+    )
+    replace_once(
+        path,
+        "        {:entry (merge entry\n                       (or (:metadata value) {})\n                       (or (:entry value) {}))",
+        "        {:entry (merge entry\n                       (compat/canonicalize-map (or (:metadata value) {}))\n                       (compat/canonicalize-map (or (:entry value) {})))",
+    )
+    replace_once(
+        path,
+        "        (let [metadata (or (first value) {})]",
+        "        (let [metadata (compat/canonicalize-map (or (first value) {}))]",
+    )
+    replace_once(
+        path,
+        "      {:grammar (:provenance selected)",
+        "      {:grammar (compat/canonicalize-map (:provenance selected))",
+    )
+    replace_once(
+        path,
+        "  (compile-form [compiler raw selected context]\n    (let [normalized",
+        "  (compile-form [compiler raw selected context]\n    (let [context (compat/canonicalize-map context)\n          normalized",
+    )
+    replace_once(
+        path,
+        "  (compile-entry [compiler entry selected context]\n    (let [formatted",
+        "  (compile-entry [compiler entry selected context]\n    (let [entry (compat/canonicalize-map entry)\n          context (compat/canonicalize-map context)\n          formatted",
+    )
+    replace_once(
+        path,
+        "  ([publisher compiled context]\n   (let [selected (:grammar compiled)\n         entry (:entry compiled)",
+        "  ([publisher compiled context]\n   (let [context (compat/canonicalize-map context)\n         selected (:grammar compiled)\n         entry (compat/canonicalize-map (:entry compiled))",
+    )
+
+
+def patch_module_compiler() -> None:
+    path = "core/lib/src/lang/core/compile.hal"
+    replace_once(
+        path,
+        "(:require [std.foundation.string :as string]",
+        "(:require [std.foundation.string :as string]\n            [lang.common.compat :as compat]",
+    )
+    replace_once(
+        path,
+        "      (if (map? value)\n        (if (:entry value)\n          value\n          (assoc value :entry qualified))\n        (diagnostic",
+        "      (if (map? value)\n        (let [value (compat/canonicalize-map value)]\n          (if (:entry value)\n            value\n            (assoc value :entry qualified)))\n        (diagnostic",
+    )
+
+
+def main() -> None:
+    if not (ROOT / "core/lib/src/lang").is_dir():
+        raise SystemExit("HARA-2 requires the completed lang.* namespace cut")
+    if (ROOT / "core/lib/src/tahto").exists():
+        raise SystemExit("legacy compiler namespace tree still exists")
+
+    changed_files, replacements = module["rewrite_keyword_literals"]()
+    patch_common_compiler()
+    patch_module_compiler()
+    module["write"](
+        ROOT / "core/lib/src/lang/common/provenance.hal",
+        module["PROVENANCE_SOURCE"],
+    )
+    module["patch_emit"]()
+    module["patch_emit_rewrite"]()
+    module["patch_postgres"]()
+    module["patch_evaluation"]()
+    module["patch_runtime"]()
+    module["patch_compiler_test"]()
+    module["patch_namespace_plan"]()
+
+    run = module["run"]
+    run("python3", "packaging/scripts/sync-rust-hal-src")
+    run("python3", "packaging/scripts/check-language-source-layout")
+    run("python3", "packaging/scripts/check-no-tahto-namespaces")
+    run("python3", "packaging/scripts/check-no-tahto-language-metadata")
+    run("python3", "packaging/scripts/sync-rust-hal-src", "--check")
+    run("git", "diff", "--check")
+
+    print(
+        "generated HARA-2 metadata migration: "
+        f"{changed_files} files, {replacements} literal replacements"
+    )
+
+
+if __name__ == "__main__":
+    main()
