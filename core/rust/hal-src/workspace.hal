@@ -1,0 +1,14 @@
+(ns workspace
+  (:require [workspace.core :as core]
+            [workspace.model :as model]))
+
+(def create core/create)
+(def dispatch core/dispatch)
+(def view core/view)
+(def result core/result)
+
+(def area model/area)
+(def component model/component)
+(def component-view model/component-view)
+(def find-area model/find-area)
+(def component-contract model/component-contract)
