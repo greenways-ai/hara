@@ -39,6 +39,14 @@ jobs:
           git checkout --detach "$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Checkout pinned hara-www payload
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-www
+          ref: 3acd4ecfd024ef48320239751e89c80b81fd25d0
+          path: website/hara-www
+          fetch-depth: 1
+          submodules: recursive
       - name: Build and verify Studio runtime
         run: packaging/scripts/build-studio-runtime "${{ steps.release.outputs.version }}"
       - name: Create or update release runtime assets
