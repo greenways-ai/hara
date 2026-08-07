@@ -25,6 +25,7 @@ jobs:
       run: |
         cargo metadata --manifest-path core/rust/Cargo.toml --no-deps --format-version 1 >/dev/null
         cargo package --manifest-path core/rust/Cargo.toml -p hara-abi
+        cargo package --manifest-path core/rust/Cargo.toml -p hara-hta
     - name: Publish crates in dependency order
       run: |
         wait_for_crate() {
@@ -42,6 +43,8 @@ jobs:
 
         cargo publish --manifest-path core/rust/Cargo.toml -p hara-abi
         wait_for_crate hara-abi 0.1.0
+        cargo publish --manifest-path core/rust/Cargo.toml -p hara-hta
+        wait_for_crate hara-hta 0.1.0
         cargo publish --manifest-path core/rust/Cargo.toml -p hara-wasm
         wait_for_crate hara-wasm 0.1.4
         cargo publish --manifest-path core/rust/Cargo.toml -p hara-vm
@@ -51,6 +54,7 @@ jobs:
       run: |
         mkdir -p dist/rust-crates
         cp core/rust/target/package/hara-abi-0.1.0.crate dist/rust-crates/
+        cp core/rust/target/package/hara-hta-0.1.0.crate dist/rust-crates/
         cp core/rust/target/package/hara-wasm-0.1.4.crate dist/rust-crates/
         cp core/rust/target/package/hara-vm-0.1.0.crate dist/rust-crates/
         cp core/rust/target/package/hara-compiler-0.1.0.crate dist/rust-crates/
