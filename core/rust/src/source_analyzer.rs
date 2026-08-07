@@ -8,7 +8,6 @@
 use crate::core::Value;
 use crate::kernel::{normalize_schema, read_forms, Form, SchemaType, Span, SpannedForm};
 use crate::lang::data::{OrderedMap, Vector};
-use crate::lang::protocol::IDisplay;
 use crate::vm::FunctionId;
 use crate::whole_wasm::NativeModule;
 use sha2::{Digest, Sha256};
