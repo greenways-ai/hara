@@ -14,25 +14,71 @@ on:
       - 'scripts/write-kernel-manifest.mjs'
       - 'scripts/sync-hara-ui.mjs'
       - '.github/scripts/verify-benchmark-observatory.sh'
+      - '.github/scripts/verify-shared-identity.sh'
       - '.github/workflows/pages-www.yml'
   workflow_dispatch:
+    inputs:
+      promote_production:
+        description: Promote the exact tested prod commit to www.hara-lang.org
+        required: true
+        default: false
+        type: boolean
+      tested_sha:
+        description: Exact 40-character prod commit already verified on www.testing.hara-lang.org
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: netlify-www-prod
+  group: netlify-www-${{ github.event_name }}-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      artifact_name: ${{ steps.source.outputs.artifact }}
     steps:
-      - name: Checkout
+      - name: Checkout exact source
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tested_sha != '' && inputs.tested_sha || github.sha }}
+          fetch-depth: 0
           submodules: true
+      - name: Validate production promotion request
+        if: github.event_name == 'workflow_dispatch' && inputs.promote_production == true
+        env:
+          TESTED_SHA: ${{ inputs.tested_sha }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$GITHUB_REF_NAME" != "prod" ]]; then
+            echo 'Production promotion must be dispatched from the prod branch.' >&2
+            exit 1
+          fi
+          if [[ ! "$TESTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'tested_sha must be an exact lowercase 40-character commit SHA.' >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$TESTED_SHA" ]]; then
+            echo 'The checked-out source does not match tested_sha.' >&2
+            exit 1
+          fi
+          remote_prod="$(git ls-remote origin refs/heads/prod | cut -f1)"
+          if [[ "$remote_prod" != "$TESTED_SHA" ]]; then
+            echo 'tested_sha is no longer the current prod head; test the new prod head before promotion.' >&2
+            exit 1
+          fi
+      - name: Record immutable source
+        id: source
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "artifact=hara-www-$sha" >> "$GITHUB_OUTPUT"
       - name: Checkout validated benchmark evidence
         uses: actions/checkout@v4
         with:
@@ -81,6 +127,7 @@ jobs:
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           node --check website/public/assets/install-copy.js
+          node --check website/public/assets/identity-loader.js
       - name: Verify generated website files
         run: |
           set -Eeuo pipefail
@@ -92,6 +139,7 @@ jobs:
           test -e target/www/_redirects
           test -s target/www/assets/install-copy.js
           test -s target/www/assets/install-copy.css
+          test -s target/www/assets/identity-loader.js
       - name: Verify generated benchmark contracts
         run: |
           set -Eeuo pipefail
@@ -114,15 +162,74 @@ jobs:
           grep -Fq '/assets/install-copy.js' target/www/index.html
           grep -Fq '/assets/install-copy.css' target/www/index.html
           grep -Fq 'Copy Homebrew install command' target/www/assets/install-copy.js
-      - name: Deploy prod to www.testing.hara-lang.org
-        run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
+      - name: Verify generated shared identity shell
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'data-hara-identity' target/www/index.html
+          grep -Fq 'data-hara-identity-fallback' target/www/index.html
+          grep -Fq '/assets/identity-loader.js' target/www/index.html
+          grep -Fq 'hara-identity-auto' target/www/docs/start/orientation/index.html
+          grep -Fq '/assets/identity-loader.js' target/www/docs/start/orientation/index.html
+          grep -Fq '/v1/identity-client.js' target/www/assets/identity-loader.js
+          if grep -R -E 'HARA_GITHUB_OAUTH_CLIENT_SECRET|HARA_AUTH_SESSION_SECRET|/auth/github/callback' target/www; then
+            echo 'The www artifact must not contain Identity secrets or a local OAuth callback.' >&2
+            exit 1
+          fi
+      - name: Upload immutable website artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.artifact }}
+          path: target/www
+          if-no-files-found: error
+          retention-days: 3
+
+  deploy-testing:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout verification scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.source_sha }}
+          fetch-depth: 1
+      - name: Download immutable website artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: target/www
+      - name: Deploy candidate to www.testing.hara-lang.org
+        run: npx --yes netlify-cli deploy --prod --dir target/www --message "tested ${{ needs.build.outputs.source_sha }}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
       - name: Verify the testing Astro benchmark site
         run: bash .github/scripts/verify-benchmark-observatory.sh https://www.testing.hara-lang.org/benchmarks/
-      - name: Deploy production to www.hara-lang.org
-        run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
+      - name: Verify testing shared identity
+        run: bash .github/scripts/verify-shared-identity.sh
+        env:
+          HARA_SITE_ORIGIN: https://www.testing.hara-lang.org
+          HARA_IDENTITY_ORIGIN: https://id.testing.hara-lang.org
+
+  deploy-production:
+    if: github.event_name == 'workflow_dispatch' && inputs.promote_production == true
+    needs: [build, deploy-testing]
+    runs-on: ubuntu-latest
+    environment:
+      name: hara-www-production
+      url: https://www.hara-lang.org
+    steps:
+      - name: Checkout verification scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.source_sha }}
+          fetch-depth: 1
+      - name: Download the tested website artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: target/www
+      - name: Deploy tested artifact to www.hara-lang.org
+        run: npx --yes netlify-cli deploy --prod --dir target/www --message "production ${{ needs.build.outputs.source_sha }}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
@@ -140,3 +247,8 @@ jobs:
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
       - name: Verify the production Astro benchmark site
         run: bash .github/scripts/verify-benchmark-observatory.sh https://www.hara-lang.org/benchmarks/
+      - name: Verify production shared identity
+        run: bash .github/scripts/verify-shared-identity.sh
+        env:
+          HARA_SITE_ORIGIN: https://www.hara-lang.org
+          HARA_IDENTITY_ORIGIN: https://id.hara-lang.org
