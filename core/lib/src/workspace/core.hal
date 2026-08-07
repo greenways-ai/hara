@@ -1,0 +1,60 @@
+(ns workspace.core
+  (:require [workspace.model :as model]))
+
+(defn create [descriptor]
+  (let [workspace (model/normalize descriptor)
+        selected (model/default-area-id workspace)]
+    (assoc workspace
+           :workspace/revision 0
+           :workspace/selection {:area/id selected})))
+
+(defn view [workspace]
+  {:workspace/id (get workspace :workspace/id)
+   :workspace/layout (get workspace :workspace/layout)
+   :workspace/documents (get workspace :workspace/documents [])
+   :workspace/areas (get workspace :workspace/areas [])
+   :workspace/nodes (get workspace :workspace/nodes [])
+   :workspace/connections (get workspace :workspace/connections [])
+   :workspace/links (get workspace :workspace/links [])
+   :workspace/selection (get workspace :workspace/selection)
+   :workspace/revision (get workspace :workspace/revision 0)})
+
+(defn result [workspace effects]
+  {:state workspace
+   :view (view workspace)
+   :effects effects})
+
+(defn- reject [workspace event reason]
+  (result workspace
+          [{:effect/type :workspace/event-rejected
+            :event event
+            :reason reason}]))
+
+(defn- select-area [workspace event]
+  (let [area-id (get event :area/id)
+        area (model/find-area workspace area-id)]
+    (if area
+      (let [next (assoc workspace
+                        :workspace/selection {:area/id area-id}
+                        :workspace/revision (+ 1 (get workspace :workspace/revision 0)))]
+        (result next []))
+      (reject workspace event :workspace/area-not-found))))
+
+(defn- route-area-event [workspace event]
+  (let [area-id (get event :area/id)
+        area (model/find-area workspace area-id)]
+    (if area
+      (result workspace
+              [{:effect/type :workspace/extension-event
+                :area/id area-id
+                :area/type (get area :area/type)
+                :event event}])
+      (reject workspace event :workspace/area-not-found))))
+
+(defn dispatch [workspace event]
+  (let [event-type (get event :event/type)]
+    (if (= event-type :workspace/area-select)
+      (select-area workspace event)
+      (if (get event :area/id)
+        (route-area-event workspace event)
+        (reject workspace event :workspace/event-unsupported)))))

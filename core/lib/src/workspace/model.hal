@@ -1,0 +1,56 @@
+(ns workspace.model)
+
+(def workspace-type :workspace)
+(def workspace-version "1.0.0")
+(def component-contract "workspace.component/1")
+
+(defn component
+  ([id model]
+   (component id model []))
+  ([id model events]
+   {:component/id id
+    :component/contract component-contract
+    :component/model model
+    :component/events events}))
+
+(defn area
+  ([id type component]
+   (area id type id component))
+  ([id type title component]
+   {:area/id id
+    :area/type type
+    :area/title title
+    :area/component component}))
+
+(defn normalize [descriptor]
+  (assoc descriptor
+         :hara/type workspace-type
+         :hara/version (get descriptor :hara/version workspace-version)
+         :workspace/areas (get descriptor :workspace/areas [])
+         :workspace/documents (get descriptor :workspace/documents [])
+         :workspace/nodes (get descriptor :workspace/nodes [])
+         :workspace/connections (get descriptor :workspace/connections [])
+         :workspace/links (get descriptor :workspace/links [])))
+
+(defn find-area
+  ([workspace area-id]
+   (find-area (get workspace :workspace/areas []) area-id 0))
+  ([areas area-id index]
+   (if (= index (count areas))
+     nil
+     (let [area (nth areas index)]
+       (if (= area-id (get area :area/id))
+         area
+         (find-area areas area-id (+ index 1)))))))
+
+(defn default-area-id [workspace]
+  (let [areas (get workspace :workspace/areas [])]
+    (if (= 0 (count areas))
+      nil
+      (get (nth areas 0) :area/id))))
+
+(defn component-view [workspace area-id]
+  (let [area (find-area workspace area-id)]
+    (if area
+      (get area :area/component)
+      nil)))

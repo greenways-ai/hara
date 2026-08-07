@@ -1,0 +1,60 @@
+(ns workspace.core-test
+  (:require [std.lib.test :as test]
+            [workspace :as workspace]))
+
+(def preview
+  (workspace/component "hodos.dev/preview"
+                       {:output {:type :render :tree [:main "Ready"]}}
+                       ["preview/open-source" "preview/retry"]))
+
+(def descriptor
+  {:workspace/id :example/workspace
+   :workspace/layout
+   {:layout/type :split
+    :layout/direction :horizontal
+    :layout/ratio 0.6
+    :layout/first {:layout/type :area :layout/area "area/editor"}
+    :layout/second {:layout/type :area :layout/area "area/preview"}}
+   :workspace/areas
+   [(workspace/area "area/editor" :hodos.dev/editor "Editor" nil)
+    (workspace/area "area/preview" :hodos.dev/preview "Preview" preview)]})
+
+(def state (workspace/create descriptor))
+
+(def results
+  [(test/check "Workspace selects its first area and projects plain component data"
+               [(get (get (workspace/view state) :workspace/selection) :area/id)
+                (get (workspace/component-view state "area/preview") :component/contract)
+                (get (workspace/component-view state "area/preview") :component/id)]
+               ["area/editor" "workspace.component/1" "hodos.dev/preview"])
+
+   (test/check "Workspace area selection is a headless state transition"
+               (let [output (workspace/dispatch state
+                                                {:event/type :workspace/area-select
+                                                 :area/id "area/preview"})
+                     next (get output :state)]
+                 [(get (get next :workspace/selection) :area/id)
+                  (get next :workspace/revision)
+                  (get output :effects)])
+               ["area/preview" 1 []])
+
+   (test/check "Workspace rejects selection of an unknown area without changing state"
+               (let [output (workspace/dispatch state
+                                                {:event/type :workspace/area-select
+                                                 :area/id "area/missing"})]
+                 [(= state (get output :state))
+                  (get (nth (get output :effects) 0) :reason)])
+               [true :workspace/area-not-found])
+
+   (test/check "Workspace routes component events as effects for the owning extension"
+               (let [event {:event/type "preview/retry"
+                            :area/id "area/preview"}
+                     output (workspace/dispatch state event)
+                     effect (nth (get output :effects) 0)]
+                 [(get effect :effect/type)
+                  (get effect :area/type)
+                  (get effect :event)])
+               [:workspace/extension-event :hodos.dev/preview
+                {:event/type "preview/retry" :area/id "area/preview"}])])
+
+(test/print-results results)
