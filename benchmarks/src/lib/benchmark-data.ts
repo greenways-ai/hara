@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import catalogSource from "../../../lib/bench/catalog.json";
+import catalogSource from "../../../core/lib/bench/catalog.json";
 
 export type Measurement = {
   runtime: string;
@@ -29,236 +29,206 @@ type Evidence = {
 type LanguageMeasurement = {
   runtime: string;
   workload: string;
-  status: string;
-  analysis?: { steady_ns?: number };
+  steady_ns: number;
 };
 type LanguageEvidence = {
   measurements: LanguageMeasurement[];
   runtime_order?: string[];
-  environment?: { timestamp?: string };
+  environment: { timestamp: string };
 };
-export type ComparisonRow = {
-  runtime: string;
-  label: string;
-  overallRatio: number;
-  haraWins: number;
-  competitorWins: number;
+type RuntimeArtifact = {
+  id: string;
+  host: string;
+  representation: string;
+  summary: string;
+  invocation: string;
+};
+type BenchmarkCatalog = {
+  artifacts: RuntimeArtifact[];
+  class_competitors: string[];
+  language_competitors: string[];
+  lisp_competitors: string[];
+  reference_competitors: string[];
 };
 
-type Catalog = typeof catalogSource;
-export const catalog: Catalog = catalogSource;
-const evidencePath = fileURLToPath(new URL("../../../lib/bench/results/reference-v2.json", import.meta.url));
-const languageEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/language-reference.json", import.meta.url));
-export const evidence: Evidence | null = existsSync(evidencePath)
-  ? JSON.parse(readFileSync(evidencePath, "utf8"))
-  : null;
-const languageEvidence: LanguageEvidence | null = existsSync(languageEvidencePath)
-  ? JSON.parse(readFileSync(languageEvidencePath, "utf8"))
-  : null;
+const catalog = catalogSource as BenchmarkCatalog;
 
-const classEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/class-reference.json", import.meta.url));
-const classEvidence: LanguageEvidence | null = existsSync(classEvidencePath)
-  ? JSON.parse(readFileSync(classEvidencePath, "utf8"))
-  : null;
+const classEvidencePath = fileURLToPath(new URL("../../../core/lib/bench/results/class-reference.json", import.meta.url));
+const runtimeEvidencePath = fileURLToPath(new URL("../../../core/lib/bench/results/runtime.json", import.meta.url));
+const httpEvidencePath = fileURLToPath(new URL("../../../core/lib/bench/results/http.json", import.meta.url));
+const languageEvidencePath = fileURLToPath(new URL("../../../core/lib/bench/results/language.json", import.meta.url));
 
-export const haraRuntime = "hara-rust-full";
-export const haraClassRuntime = "hara-rust-whole-wasm-prepared";
-export const workloads = catalog.corpus.workloads;
-export const runtimeLabels: Record<string, string> = {
-  "hara-rust-full": "Hara",
+function readEvidence<T>(path: string, fallback: T): T {
+  if (!existsSync(path)) return fallback;
+  return JSON.parse(readFileSync(path, "utf8")) as T;
+}
+
+const runtimeEvidence = readEvidence<Evidence>(runtimeEvidencePath, {
+  measurements: [],
+  environment: { timestamp: "unavailable" },
+});
+const httpEvidence = readEvidence<Evidence>(httpEvidencePath, {
+  measurements: [],
+  environment: { timestamp: "unavailable" },
+  http_measurements: [],
+});
+const languageEvidence = readEvidence<LanguageEvidence>(languageEvidencePath, {
+  measurements: [],
+  environment: { timestamp: "unavailable" },
+});
+const classEvidence = readEvidence<LanguageEvidence>(classEvidencePath, {
+  measurements: [],
+  environment: { timestamp: "unavailable" },
+});
+
+const runtimeBaseline = "hara-rust-full";
+const haraRuntime = "hara-rust-full";
+const haraClassRuntime = "hara-rust-whole-wasm-prepared";
+
+const workloadMeta: Record<string, { label: string; summary: string }> = {
+  fib: { label: "Fibonacci", summary: "Recursive integer calls" },
+  json: { label: "JSON", summary: "Parse and traverse structured data" },
+  loops: { label: "Loops", summary: "Tight integer iteration" },
+  sieve: { label: "Sieve", summary: "Prime-number array workload" },
+  sort: { label: "Sort", summary: "Comparison and mutation" },
+  strings: { label: "Strings", summary: "Text construction and traversal" },
+  records: { label: "Records", summary: "Object allocation and field access" },
+  dispatch: { label: "Dispatch", summary: "Dynamic method dispatch" },
+};
+
+const runtimeLabels: Record<string, string> = {
+  "luajit-prepared": "LuaJIT",
+  "pypy-prepared": "PyPy",
+  "node-prepared": "Node.js",
+  "ruby-yjit-prepared": "Ruby YJIT",
+  "clojure-prepared": "Clojure",
   "sbcl-prepared": "SBCL",
   "chez-prepared": "Chez Scheme",
   "guile-prepared": "Guile",
   "bb-prepared": "Babashka",
-  "python-prepared": "Python",
   "rust-prepared": "Rust",
   "c-prepared": "C",
   "java-prepared": "Java",
-  "luajit-prepared": "LuaJIT",
-  "pypy-prepared": "PyPy",
-  "node-prepared": "Node.js / V8",
-  "ruby-yjit-prepared": "Ruby (YJIT)",
-  "clojure-prepared": "Clojure",
-  "hara-rust-whole-wasm-prepared": "Hara"
-};
-export const workloadMeta: Record<string, { label: string; summary: string }> = {
-  "sieve-array": { label: "Sieve", summary: "Integer loops and mutable array traversal." },
-  "towers-recursive": { label: "Towers", summary: "Recursive calls and stack movement." },
-  "queens-backtracking": { label: "Queens", summary: "Backtracking, branching, and board checks." },
-  "heap-permute": { label: "Heap permutation", summary: "Recursive permutation with repeated swaps." },
-  "ackermann-deep": { label: "Ackermann", summary: "Very deep recursive call pressure." },
-  "tak-branching": { label: "Tak", summary: "Branch-heavy recursive evaluation." },
-  "collatz-range": { label: "Collatz", summary: "Integer loops, conditions, and range traversal." },
-  "matrix-multiply": { label: "Matrix multiply", summary: "Nested numeric loops over array data." }
+  "python-prepared": "Python",
 };
 
-export const runtimeIndex = new Map<string, Measurement>(
-  (evidence?.measurements ?? []).map((row) => [`${row.runtime}/${row.workload}`, row])
+const runtimeMeasurements = new Map(
+  runtimeEvidence.measurements.map((measurement) => [`${measurement.runtime}:${measurement.workload}`, measurement]),
 );
-const languageIndex = new Map<string, number>(
-  (languageEvidence?.measurements ?? [])
-    .filter((row) => row.status === "ok" && row.analysis?.steady_ns != null)
-    .map((row) => [`${row.runtime}/${row.workload}`, row.analysis!.steady_ns!])
+const languageMeasurements = new Map(
+  languageEvidence.measurements.map((measurement) => [`${measurement.runtime}:${measurement.workload}`, measurement]),
 );
-const geometricMean = (values: number[]) =>
-  values.length ? Math.exp(values.reduce((sum, value) => sum + Math.log(value), 0) / values.length) : null;
-export const ratioFor = (runtime: string, workload: string) => {
-  const hara = languageIndex.get(`${haraRuntime}/${workload}`);
-  const candidate = languageIndex.get(`${runtime}/${workload}`);
-  return hara && candidate ? candidate / hara : null;
-};
-const overallRatioFor = (runtime: string) =>
-  geometricMean(workloads.flatMap((workload) => {
-    const ratio = ratioFor(runtime, workload);
-    return ratio == null ? [] : [ratio];
-  }));
+const classMeasurements = new Map(
+  classEvidence.measurements.map((measurement) => [`${measurement.runtime}:${measurement.workload}`, measurement]),
+);
 
-const languageRuntimes = languageEvidence?.runtime_order ?? [
+const workloads = [...new Set([
+  ...runtimeEvidence.measurements.map((measurement) => measurement.workload),
+  ...languageEvidence.measurements.map((measurement) => measurement.workload),
+  ...classEvidence.measurements.map((measurement) => measurement.workload),
+])].sort();
+
+function geometricMean(values: number[]) {
+  const valid = values.filter((value) => Number.isFinite(value) && value > 0);
+  if (!valid.length) return null;
+  return Math.exp(valid.reduce((total, value) => total + Math.log(value), 0) / valid.length);
+}
+
+function ratioFor(runtime: string, workload: string) {
+  const hara = languageMeasurements.get(`${haraRuntime}:${workload}`)?.steady_ns;
+  const competitor = languageMeasurements.get(`${runtime}:${workload}`)?.steady_ns;
+  if (!hara || !competitor) return null;
+  return competitor / hara;
+}
+
+const languageRuntimeIds = [
   haraRuntime,
-  ...catalog.language_competitors.map((name) => `${name}-prepared`)
+  ...catalog.language_competitors.map((name: string) => `${name}-prepared`),
 ];
-export const comparisonRows: ComparisonRow[] = languageRuntimes
-  .filter((runtime) => runtime !== haraRuntime)
-  .flatMap((runtime) => {
-    const overallRatio = overallRatioFor(runtime);
-    if (overallRatio == null) return [];
-    const haraWins = workloads.filter((workload) => (ratioFor(runtime, workload) ?? 0) > 1).length;
-    const competitorWins = workloads.filter((workload) => {
-      const ratio = ratioFor(runtime, workload);
-      return ratio != null && ratio < 1;
-    }).length;
-    return [{
-      runtime,
-      label: runtimeLabels[runtime] ?? runtime.replace(/-prepared$/, ""),
-      overallRatio,
-      haraWins,
-      competitorWins
-    }];
-  })
-  .sort((left, right) => right.overallRatio - left.overallRatio);
-export const haraLeadingRows = comparisonRows.filter((row) => row.overallRatio > 1);
-export const competitorLeadingRows = comparisonRows.filter((row) => row.overallRatio < 1);
-export const sweptRows = comparisonRows.filter((row) => row.haraWins === workloads.length);
-export const maxLeadRow = haraLeadingRows.at(0) ?? null;
-export const closestRow = comparisonRows.reduce<ComparisonRow | null>((best, row) => {
-  if (!best) return row;
-  return Math.abs(Math.log(row.overallRatio)) < Math.abs(Math.log(best.overallRatio)) ? row : best;
-}, null);
 
-const classIndex = new Map<string, number>(
-  (classEvidence?.measurements ?? [])
-    .filter((row) => row.status === "ok" && row.analysis?.steady_ns != null)
-    .map((row) => [`${row.runtime}/${row.workload}`, row.analysis!.steady_ns!])
-);
-const classStatusIndex = new Map<string, string>(
-  (classEvidence?.measurements ?? []).map((row) => [`${row.runtime}/${row.workload}`, row.status])
-);
-export const classStatusFor = (runtime: string, workload: string) =>
-  classStatusIndex.get(`${runtime}/${workload}`) ?? "pending";
-export const ratioForClass = (runtime: string, workload: string) => {
-  const hara = classIndex.get(`${haraClassRuntime}/${workload}`);
-  const candidate = classIndex.get(`${runtime}/${workload}`);
-  return hara && candidate ? candidate / hara : null;
-};
-export const classTime = (runtime: string, workload: string) => classIndex.get(`${runtime}/${workload}`);
-const buildClassRows = (runtimes: string[]): ComparisonRow[] =>
-  runtimes
-    .flatMap((runtime) => {
-      const overallRatio = geometricMean(workloads.flatMap((workload) => {
+const languageRows = languageRuntimeIds.map((runtime) => ({
+  runtime,
+  label: runtime === haraRuntime ? "Hara" : (runtimeLabels[runtime] ?? runtime),
+  overall: runtime === haraRuntime
+    ? 1
+    : geometricMean(workloads.flatMap((workload: string) => {
+      const ratio = ratioFor(runtime, workload);
+      return ratio == null ? [] : [ratio];
+    })),
+  cells: workloads.map((workload: string) => ({ workload, ratio: runtime === haraRuntime ? 1 : ratioFor(runtime, workload) })),
+  haraWins: runtime === haraRuntime ? workloads.length : workloads.filter((workload: string) => (ratioFor(runtime, workload) ?? 0) > 1).length,
+  competitorWins: runtime === haraRuntime ? 0 : workloads.filter((workload: string) => {
+    const ratio = ratioFor(runtime, workload);
+    return ratio != null && ratio < 1;
+  }).length,
+}));
+
+function ratioForClass(runtime: string, workload: string) {
+  const hara = classMeasurements.get(`${haraClassRuntime}:${workload}`)?.steady_ns;
+  const competitor = classMeasurements.get(`${runtime}:${workload}`)?.steady_ns;
+  if (!hara || !competitor) return null;
+  return competitor / hara;
+}
+
+function buildClassRows(runtimeIds: string[]) {
+  return [haraClassRuntime, ...runtimeIds].map((runtime) => {
+    const isHara = runtime === haraClassRuntime;
+    const overallRatio = isHara
+      ? 1
+      : geometricMean(workloads.flatMap((workload: string) => {
         const ratio = ratioForClass(runtime, workload);
         return ratio == null ? [] : [ratio];
       }));
-      if (overallRatio == null) return [];
-      const haraWins = workloads.filter((workload) => (ratioForClass(runtime, workload) ?? 0) > 1).length;
-      const competitorWins = workloads.filter((workload) => {
-        const ratio = ratioForClass(runtime, workload);
-        return ratio != null && ratio < 1;
-      }).length;
-      return [{
-        runtime,
-        label: runtimeLabels[runtime] ?? runtime.replace(/-prepared$/, ""),
-        overallRatio,
-        haraWins,
-        competitorWins
-      }];
-    })
-    .sort((left, right) => right.overallRatio - left.overallRatio);
-export type ClassGroup = { id: string; title: string; summary: string; rows: ComparisonRow[] };
-export const classGroups: ClassGroup[] = [
+    const haraWins = isHara ? workloads.length : workloads.filter((workload: string) => (ratioForClass(runtime, workload) ?? 0) > 1).length;
+    const competitorWins = isHara ? 0 : workloads.filter((workload: string) => {
+      const ratio = ratioForClass(runtime, workload);
+      return ratio != null && ratio < 1;
+    }).length;
+    return {
+      runtime,
+      label: isHara ? "Hara" : (runtimeLabels[runtime] ?? runtime),
+      overall: overallRatio,
+      cells: workloads.map((workload: string) => ({ workload, ratio: isHara ? 1 : ratioForClass(runtime, workload) })),
+      haraWins,
+      competitorWins,
+    };
+  });
+}
+
+const classGroups = [
   {
     id: "class",
-    title: "Best in class",
-    summary: "Hara measured first against dynamic runtimes with adaptive compilation — its own class.",
-    rows: buildClassRows(catalog.class_competitors.map((name) => `${name}-prepared`))
+    title: "Dynamic language class",
+    summary: "Hara against modern dynamic language runtimes.",
+    rows: buildClassRows(catalog.class_competitors.map((name: string) => `${name}-prepared`)),
   },
   {
     id: "lisp",
-    title: "Lisp family",
-    summary: "Common Lisp, Scheme and Clojure-derived runtimes, grouped separately from the dynamic-JIT claim.",
-    rows: buildClassRows(catalog.lisp_competitors.map((name) => `${name}-prepared`))
+    title: "Lisp class",
+    summary: "Hara against established Lisp and Scheme systems.",
+    rows: buildClassRows(catalog.lisp_competitors.map((name: string) => `${name}-prepared`)),
   },
   {
-    id: "references",
-    title: "Reference ceilings",
-    summary: "Rust, C, Java and Python remain essential context as differently coloured reference ceilings, not peers.",
-    rows: buildClassRows(catalog.reference_competitors.map((name) => `${name}-prepared`))
-  }
-].filter((group) => group.rows.length > 0);
-const classTimestamp = classEvidence?.environment?.timestamp;
-export const classEvidenceDate = classTimestamp && !Number.isNaN(Date.parse(classTimestamp))
-  ? new Intl.DateTimeFormat("en-AU", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZoneName: "short"
-    }).format(new Date(classTimestamp))
-  : "reference run pending";
+    id: "reference",
+    title: "Reference systems",
+    summary: "Hara against Rust, C, Java and Python reference implementations.",
+    rows: buildClassRows(catalog.reference_competitors.map((name: string) => `${name}-prepared`)),
+  },
+];
 
-export const comparisonResult = (ratio: number | null) => {
-  if (ratio == null) return { value: "—", status: "pending", label: "pending", text: "Pending" };
-  if (Math.abs(ratio - 1) < 0.015) {
-    return { value: "1.00×", status: "parity", label: "parity", text: "Hara is effectively at parity" };
-  }
-  return ratio > 1
-    ? { value: `${ratio.toFixed(2)}×`, status: "ahead", label: "ahead", text: `Hara is ${ratio.toFixed(2)}× faster` }
-    : { value: `${(1 / ratio).toFixed(2)}×`, status: "behind", label: "behind", text: `Hara is ${(1 / ratio).toFixed(2)}× slower` };
+export {
+  catalog,
+  classEvidence,
+  classGroups,
+  haraClassRuntime,
+  haraRuntime,
+  httpEvidence,
+  languageEvidence,
+  languageRows,
+  runtimeBaseline,
+  runtimeEvidence,
+  runtimeLabels,
+  runtimeMeasurements,
+  workloadMeta,
+  workloads,
 };
-export const formatTime = (ns: number | null | undefined) =>
-  ns == null ? "Pending" : ns < 1e6 ? `${(ns / 1e3).toFixed(1)} µs` : `${(ns / 1e6).toFixed(2)} ms`;
-export const formatRps = (value: number | null | undefined) =>
-  value == null ? "Pending" : value >= 1e3 ? `${(value / 1e3).toFixed(1)}k` : value.toFixed(1);
-export const languageTime = (runtime: string, workload: string) => languageIndex.get(`${runtime}/${workload}`);
-export const httpRows = evidence?.http_measurements ?? [];
-export const hasHttpEvidence = httpRows.length > 0;
-export const httpRoutes = [...new Set(httpRows.map((row) => row.route))];
-export const httpServers = [...new Set(httpRows.map((row) => row.server))];
-export const httpIndex = new Map<string, HttpMeasurement>(
-  httpRows.map((row) => [`${row.server}/${row.route}`, row])
-);
-export const httpBaseline = "hoplite-raw";
-export const httpRatioFor = (server: string, route: string) => {
-  const baseline = httpIndex.get(`${httpBaseline}/${route}`);
-  const candidate = httpIndex.get(`${server}/${route}`);
-  return baseline?.requests_per_second && candidate?.requests_per_second
-    ? baseline.requests_per_second / candidate.requests_per_second
-    : null;
-};
-export const runtimeBaseline = haraRuntime;
-export const steadyRatioFor = (artifact: string, workload: string) => {
-  const baseline = runtimeIndex.get(`${runtimeBaseline}/${workload}`);
-  const candidate = runtimeIndex.get(`${artifact}/${workload}`);
-  return baseline && candidate ? candidate.steady_ns / baseline.steady_ns : null;
-};
-const timestamp = languageEvidence?.environment?.timestamp ?? evidence?.environment?.timestamp;
-export const evidenceDate = timestamp && !Number.isNaN(Date.parse(timestamp))
-  ? new Intl.DateTimeFormat("en-AU", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZoneName: "short"
-    }).format(new Date(timestamp))
-  : "reference run pending";
