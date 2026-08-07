@@ -93,4 +93,4 @@ jobs:
           npm test --prefix website/hara-www
           npm run build --prefix website/hara-www
           grep -F '<meta name="hara-identity-mode" content="popup"' website/hara-www/dist/index.html
-          grep -F '<meta name="hara-identity-mode" content="popup"' website/hara-www/dist/docs/start/orientation/index.html
+          grep -F '<meta name="hara-identity-auto" content="starlight"' website/hara-www/dist/docs/start/orientation/index.html
