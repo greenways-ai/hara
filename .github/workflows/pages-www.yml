@@ -37,6 +37,13 @@ jobs:
           ref: benchmark-site
           path: .benchmark-site
           fetch-depth: 1
+      - name: Checkout reviewed hara-docs release
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-docs
+          ref: 563edc868ebd3bca018f6102f706a6600b5d0722
+          path: website/docs
+          fetch-depth: 1
       - name: Checkout reviewed hara-www popup release
         uses: actions/checkout@v4
         with:
