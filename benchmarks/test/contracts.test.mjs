@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const catalog = JSON.parse(await readFile(new URL("../../lib/bench/catalog.json", import.meta.url)));
-const classEvidence = JSON.parse(await readFile(new URL("../../lib/bench/results/class-reference.json", import.meta.url)));
+const catalog = JSON.parse(await readFile(new URL("../../core/lib/bench/catalog.json", import.meta.url)));
+const classEvidence = JSON.parse(await readFile(new URL("../../core/lib/bench/results/class-reference.json", import.meta.url)));
 const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
 const language = await readFile(new URL("../src/components/LanguagePanel.astro", import.meta.url), "utf8");
 const classPanel = await readFile(new URL("../src/components/ClassPanel.astro", import.meta.url), "utf8");
