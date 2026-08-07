@@ -40,6 +40,15 @@ jobs:
           ref: benchmark-site
           path: .benchmark-site
           fetch-depth: 1
+      - name: Checkout reviewed Hara homepage
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-www
+          ref: d619302a69954fb0e405426c22d2798863c37a68
+          path: .hara-www-release
+          fetch-depth: 1
+      - name: Sync reviewed homepage into the production snapshot
+        run: cp .hara-www-release/src/pages/index.astro website/src/pages/index.astro
       - name: Verify synchronized Hara UI assets
         run: |
           node scripts/sync-hara-ui.mjs
@@ -79,6 +88,8 @@ jobs:
           grep -F '"runtime":"rust-prepared"' target/www/benchmarks/data/runs.json
           grep -F '/benchmarks/*' target/www/_headers
           ! grep -Eq '(^[[:space:]]*/benchmarks|benchmarks\.hara-lang\.org)' target/www/_redirects
+          grep -F 'brew install hara-lang/tap/hara' target/www/index.html
+          grep -F 'https://playground.hara-lang.org/' target/www/index.html
       - name: Deploy prod to www.testing.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
