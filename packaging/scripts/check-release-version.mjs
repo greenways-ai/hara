@@ -16,8 +16,10 @@ const files = Object.fromEntries(await Promise.all([
   "core/rust/vm-runtime/Cargo.toml",
   "core/rust/Cargo.lock",
   ".github/studio-runtime-release.json",
+  ".github/workflows/studio-runtime-ci.yml",
   ".github/workflows/publish-studio-runtime.yml",
   ".github/workflows/publish-rust-crates.yml",
+  ".github/workflows/release.yml",
   "packaging/scripts/build-www"
 ].map(async (path) => [path, await readFile(resolve(root, path), "utf8")])));
 
@@ -34,6 +36,15 @@ assertEqual(lockVersion(files["core/rust/Cargo.lock"], "hara-wasm-raw"), expecte
 
 const studioRelease = JSON.parse(files[".github/studio-runtime-release.json"]);
 assertEqual(studioRelease.tag, `v${expected}`, "Studio runtime release tag");
+assertGitSha(studioRelease.haraWwwRef, "Studio runtime hara-www revision");
+for (const workflow of [
+  ".github/workflows/studio-runtime-ci.yml",
+  ".github/workflows/publish-studio-runtime.yml",
+  ".github/workflows/release.yml",
+]) {
+  requireText(files[workflow], studioRelease.haraWwwRef, `${workflow} hara-www revision`);
+  requireText(files[workflow], "submodules: recursive", `${workflow} recursive hara-www checkout`);
+}
 requireText(files[".github/workflows/publish-studio-runtime.yml"], `default: v${expected}`,
   "Studio publication workflow default");
 requireText(files[".github/workflows/publish-rust-crates.yml"],
@@ -67,6 +78,12 @@ function lockVersion(source, name) {
 function assertEqual(actual, expectedValue, label) {
   if (actual !== expectedValue) {
     throw new Error(`${label} is ${JSON.stringify(actual)}; expected ${JSON.stringify(expectedValue)}`);
+  }
+}
+
+function assertGitSha(value, label) {
+  if (typeof value !== "string" || !/^[a-f0-9]{40}$/.test(value)) {
+    throw new Error(`${label} must be a pinned 40-character lowercase Git SHA`);
   }
 }
 
