@@ -11,6 +11,7 @@ on:
       - 'packaging/scripts/check-no-tahto-language-metadata'
       - 'packaging/scripts/migrate-tahto-metadata-to-lang'
       - 'packaging/scripts/run-lang-metadata-migration'
+      - 'packaging/scripts/finalize-lang-metadata-migration'
       - 'plans/lang-metadata-migration.md'
       - '.github/workflows/generate-lang-metadata-migration.yml'
       - '.github/workflows/language-source-layout.yml'
@@ -38,13 +39,20 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate generator syntax
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
         run: |
           python3 -m py_compile packaging/scripts/migrate-tahto-metadata-to-lang
           python3 -m py_compile packaging/scripts/run-lang-metadata-migration
+          python3 -m py_compile packaging/scripts/finalize-lang-metadata-migration
           python3 -m py_compile packaging/scripts/check-no-tahto-language-metadata
 
       - name: Generate and validate HARA-2
-        run: python3 packaging/scripts/run-lang-metadata-migration
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python3 packaging/scripts/run-lang-metadata-migration
+          python3 packaging/scripts/finalize-lang-metadata-migration
 
       - name: Commit generated migration when required
         run: |
@@ -55,5 +63,5 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "Move serialized language metadata to lang"
+          git commit -m "Finalize serialized language metadata migration"
           git push origin HEAD:${{ github.event.pull_request.head.ref || github.ref_name }}
