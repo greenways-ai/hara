@@ -12,7 +12,7 @@ const reference = await readFile(new URL("../src/components/RuntimeReference.ast
 const header = await readFile(new URL("../src/components/SiteHeader.astro", import.meta.url), "utf8");
 const data = await readFile(new URL("../src/lib/benchmark-data.ts", import.meta.url), "utf8");
 const languageStyles = await readFile(new URL("../src/styles/language.css", import.meta.url), "utf8");
-const installer = await readFile(new URL("../../scripts/install-benchmark-site", import.meta.url), "utf8");
+const installer = await readFile(new URL("../../packaging/scripts/install-benchmark-site", import.meta.url), "utf8");
 const source = [page, language, classPanel, http, reference, header, data].join("\n");
 const indexOf = (value) => { const index = language.indexOf(value); assert.notEqual(index, -1, `Expected language panel to contain ${value}`); return index; };
 
