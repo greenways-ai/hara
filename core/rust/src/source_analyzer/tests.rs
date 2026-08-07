@@ -59,3 +59,19 @@ fn definition_kind_codes_are_protocol_data_not_token_indexes() {
     assert_eq!(definition_kind(9), Ok("test"));
     assert!(definition_kind(10).is_err());
 }
+
+#[test]
+fn nested_list_heads_render_without_entering_the_descendant_set() {
+    let shape = Shape::Vector(vec![
+        Shape::Vector(vec![Shape::Keyword("call".into())]),
+        Shape::Vector(vec![Shape::Keyword("string".into())]),
+    ]);
+    let summary = summarize_shape(&shape);
+    assert_eq!(summary.rendered, "[[:call] [:string]]");
+    assert_eq!(summary.node_count, 2);
+    assert_eq!(summary.depth, 2);
+    assert_eq!(
+        summary.features,
+        BTreeSet::from(["[[:call] [:string]]".into(), "[:string]".into()])
+    );
+}
