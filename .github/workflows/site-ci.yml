@@ -40,15 +40,20 @@ jobs:
           path: packages/visual-language
           fetch-depth: 1
           persist-credentials: false
-      - name: Checkout hara-www
+      - name: Remove the vendored hara-www snapshot
+        run: rm -rf website/hara-www
+      - name: Checkout reviewed hara-www
         uses: actions/checkout@v4
         with:
           repository: hara-lang/hara-www
+          ref: 320aed54f40d4d85d3140fdc67b13144516bea58
           path: website/hara-www
           fetch-depth: 1
+          persist-credentials: false
       - name: Link visual language into the nested www workspace
         run: |
           mkdir -p website/packages
+          rm -rf website/packages/visual-language
           ln -s ../../packages/visual-language website/packages/visual-language
       - uses: actions/setup-node@v4
         with:
@@ -76,3 +81,5 @@ jobs:
         run: |
           npm test --prefix website/hara-www
           npm run build --prefix website/hara-www
+          grep -F '<meta name="hara-identity-mode" content="popup"' website/hara-www/dist/index.html
+          grep -F '<meta name="hara-identity-mode" content="popup"' website/hara-www/dist/docs/start/orientation/index.html
