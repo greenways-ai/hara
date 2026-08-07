@@ -10,7 +10,7 @@ homepage = "https://www.hara-lang.org"
 documentation = "https://docs.rs/hara-wasm"
 
 [workspace]
-members = [".", "abi", "compiler", "raw", "vm-runtime"]
+members = [".", "abi", "compiler", "hta-codec", "raw", "vm-runtime"]
 default-members = ["."]
 resolver = "2"
 
@@ -81,3 +81,4 @@ path = "src/bin/hara-bytecode-artifact.rs"
 required-features = ["bytecode-vm"]
 
 [dev-dependencies]
+hara-hta = { version = "0.1.0", path = "hta-codec" }
