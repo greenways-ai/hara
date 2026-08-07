@@ -50,7 +50,7 @@ test("verifies the deployed popup www and Docs boundary against Identity contrac
   assert.match(verifier, /v1\/identity-client\.js/);
 });
 
-test("deploys testing first and promotes only an explicit exact prod commit", () => {
+test("tests an exact prod commit before explicit promotion", () => {
   assert.match(workflow, /promote_production:/);
   assert.match(workflow, /tested_sha:/);
   assert.match(workflow, /remote_prod="\$\(git ls-remote origin refs\/heads\/prod/);
@@ -61,6 +61,7 @@ test("deploys testing first and promotes only an explicit exact prod commit", ()
   assert.match(workflow, /Verify testing shared identity/);
   assert.match(workflow, /deploy-production:/);
   assert.match(workflow, /inputs\.promote_production == true/);
+  assert.match(workflow, /startsWith\(github\.event\.head_commit\.message, '\[deploy\]'\)/);
   assert.match(workflow, /environment:[\s\S]*name: hara-www-production/);
   assert.match(workflow, /Download the tested website artifact/);
   assert.match(workflow, /Verify production shared identity/);
