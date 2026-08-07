@@ -88,9 +88,11 @@ jobs:
           grep -F 'id="class-comparison"' core/target/benchmarks/index.html
           grep -F 'id="language-shootout"' core/target/benchmarks/index.html
           grep -F 'rust-prepared' core/target/benchmarks/index.html
-      - name: Validate reviewed main Hara site
-        run: |
-          npm test --prefix website/hara-www
-          npm run build --prefix website/hara-www
-          grep -F '<meta name="hara-identity-mode" content="popup"' website/hara-www/dist/index.html
-          grep -F '<meta name="hara-identity-auto" content="starlight"' website/hara-www/dist/docs/start/orientation/index.html
+      - name: Test reviewed main Hara site
+        run: npm test --prefix website/hara-www
+      - name: Build reviewed main Hara site
+        run: npm run build --prefix website/hara-www
+      - name: Validate root popup identity metadata
+        run: grep -F '<meta name="hara-identity-mode" content="popup"' website/hara-www/dist/index.html
+      - name: Validate Starlight identity metadata
+        run: grep -F '<meta name="hara-identity-auto" content="starlight"' website/hara-www/dist/docs/start/orientation/index.html
