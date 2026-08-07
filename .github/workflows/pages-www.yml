@@ -77,65 +77,44 @@ jobs:
           bash scripts/build-www
           bash scripts/install-benchmark-site publish
           bash scripts/install-www-redirects target/www
-      - name: Test website scene and Astro benchmark contracts
+      - name: Test website source contracts
         run: |
-          set -Eeuo pipefail
-
-          assert_file() {
-            local file="$1"
-            if [[ ! -s "$file" ]]; then
-              echo "::error file=$file::Missing or empty required file"
-              exit 1
-            fi
-            echo "verified file: $file"
-          }
-
-          assert_contains() {
-            local file="$1"
-            local needle="$2"
-            if ! grep -Fq -- "$needle" "$file"; then
-              echo "::error file=$file::Missing expected text: $needle"
-              exit 1
-            fi
-            echo "verified text in $file: $needle"
-          }
-
-          assert_absent_regex() {
-            local file="$1"
-            local pattern="$2"
-            if grep -Eq -- "$pattern" "$file"; then
-              echo "::error file=$file::Unexpected pattern: $pattern"
-              exit 1
-            fi
-            echo "verified absent from $file: $pattern"
-          }
-
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           node --check website/public/assets/install-copy.js
-
-          assert_file target/www/og-hara.jpg
-          assert_file target/www/benchmarks/index.html
-          assert_file target/www/benchmarks/data/catalog.json
-          assert_file target/www/benchmarks/data/runs.json
-          assert_file target/www/_headers
-          assert_file target/www/_redirects
-          assert_file target/www/assets/install-copy.js
-          assert_file target/www/assets/install-copy.css
-
-          assert_contains target/www/benchmarks/index.html '<title>Hara Benchmarks</title>'
-          assert_contains target/www/benchmarks/index.html 'id="class-comparison"'
-          assert_contains target/www/benchmarks/index.html 'id="language-shootout"'
-          assert_contains target/www/benchmarks/index.html 'rust-prepared'
-          assert_contains target/www/benchmarks/data/catalog.json '"rust"'
-          assert_contains target/www/benchmarks/data/runs.json '"runtime":"rust-prepared"'
-          assert_contains target/www/_headers '/benchmarks/*'
-          assert_absent_regex target/www/_redirects '(^[[:space:]]*/benchmarks|benchmarks\.hara-lang\.org)'
-          assert_contains target/www/index.html 'brew install hara-lang/tap/hara'
-          assert_contains target/www/index.html 'https://playground.hara-lang.org/'
-          assert_contains target/www/index.html '/assets/install-copy.js'
-          assert_contains target/www/index.html '/assets/install-copy.css'
-          assert_contains target/www/assets/install-copy.js 'Copy Homebrew install command'
+      - name: Verify generated website files
+        run: |
+          set -Eeuo pipefail
+          test -s target/www/og-hara.jpg
+          test -s target/www/benchmarks/index.html
+          test -s target/www/benchmarks/data/catalog.json
+          test -s target/www/benchmarks/data/runs.json
+          test -s target/www/_headers
+          test -e target/www/_redirects
+          test -s target/www/assets/install-copy.js
+          test -s target/www/assets/install-copy.css
+      - name: Verify generated benchmark contracts
+        run: |
+          set -Eeuo pipefail
+          grep -Fq '<title>Hara Benchmarks</title>' target/www/benchmarks/index.html
+          grep -Fq 'id="class-comparison"' target/www/benchmarks/index.html
+          grep -Fq 'id="language-shootout"' target/www/benchmarks/index.html
+          grep -Fq 'rust-prepared' target/www/benchmarks/index.html
+          grep -Fq '"rust"' target/www/benchmarks/data/catalog.json
+          grep -Fq '"runtime":"rust-prepared"' target/www/benchmarks/data/runs.json
+          grep -Fq '/benchmarks/*' target/www/_headers
+      - name: Verify generated redirect contracts
+        run: |
+          set -Eeuo pipefail
+          ! grep -Eq '(^[[:space:]]*/benchmarks|benchmarks\.hara-lang\.org)' target/www/_redirects
+      - name: Verify generated install copy control
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'brew install hara-lang/tap/hara' target/www/index.html
+          grep -Fq 'https://playground.hara-lang.org/' target/www/index.html
+          grep -Fq '/assets/install-copy.js' target/www/index.html
+          grep -Fq '/assets/install-copy.css' target/www/index.html
+          grep -Fq 'Copy Homebrew install command' target/www/assets/install-copy.js
       - name: Deploy prod to www.testing.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
