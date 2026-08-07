@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-"$REPO_ROOT/hara" run \
-  "$REPO_ROOT/core/lib/integration/hara/tahto_bootstrap_probe.hal"
+"$REPO_ROOT/core/hara" run \
+  "$REPO_ROOT/core/lib/integration/hara/lang_bootstrap_probe.hal"
 
 runtime_command=(
-  "$REPO_ROOT/hara"
+  "$REPO_ROOT/core/hara"
   --allow-net
   --allow-process
   run

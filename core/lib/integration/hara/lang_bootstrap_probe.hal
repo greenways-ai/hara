@@ -1,9 +1,9 @@
-(ns integration.hara.tahto-bootstrap-probe)
+(ns integration.hara.lang-bootstrap-probe)
 
 (defn probe [label namespace]
-  (println (str "tahto bootstrap probe: " label))
+  (println (str "lang bootstrap probe: " label))
   (require namespace)
-  (println (str "tahto bootstrap probe passed: " label)))
+  (println (str "lang bootstrap probe passed: " label)))
 
 (probe "postgres v1" 'lang.model.v1.spec-postgres)
 (probe "postgres v2" 'lang.model.v2.spec-postgres)
@@ -13,4 +13,4 @@
 (probe "postgres v6" 'lang.model.v6.spec-postgres)
 (probe "runtime basic" 'lang.runtime.basic)
 
-(println "tahto bootstrap probe complete")
+(println "lang bootstrap probe complete")

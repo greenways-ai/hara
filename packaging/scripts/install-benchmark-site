@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MODE="${1:-prepare}"
 SOURCE="${2:-$ROOT/.benchmark-site}"
 OUT="${3:-$ROOT/core/target/www}"
