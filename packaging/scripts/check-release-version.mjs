@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const expected = process.argv[2];
+const HARA_WWW_REF = "3acd4ecfd024ef48320239751e89c80b81fd25d0";
 if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(expected || "")) {
   throw new Error("usage: check-release-version.mjs VERSION");
 }
@@ -36,13 +37,13 @@ assertEqual(lockVersion(files["core/rust/Cargo.lock"], "hara-wasm-raw"), expecte
 
 const studioRelease = JSON.parse(files[".github/studio-runtime-release.json"]);
 assertEqual(studioRelease.tag, `v${expected}`, "Studio runtime release tag");
-assertGitSha(studioRelease.haraWwwRef, "Studio runtime hara-www revision");
+assertGitSha(HARA_WWW_REF, "Studio runtime hara-www revision");
 for (const workflow of [
   ".github/workflows/studio-runtime-ci.yml",
   ".github/workflows/publish-studio-runtime.yml",
   ".github/workflows/release.yml",
 ]) {
-  requireText(files[workflow], studioRelease.haraWwwRef, `${workflow} hara-www revision`);
+  requireText(files[workflow], HARA_WWW_REF, `${workflow} hara-www revision`);
   requireText(files[workflow], "submodules: recursive", `${workflow} recursive hara-www checkout`);
 }
 requireText(files[".github/workflows/publish-studio-runtime.yml"], `default: v${expected}`,
