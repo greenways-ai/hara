@@ -212,7 +212,9 @@ jobs:
           HARA_IDENTITY_ORIGIN: https://id.testing.hara-lang.org
 
   deploy-production:
-    if: github.event_name == 'workflow_dispatch' && inputs.promote_production == true
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.promote_production == true) ||
+      (github.event_name == 'push' && startsWith(github.event.head_commit.message, '[deploy]'))
     needs: [build, deploy-testing]
     runs-on: ubuntu-latest
     environment:
