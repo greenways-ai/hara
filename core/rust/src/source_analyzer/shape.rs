@@ -114,7 +114,7 @@ fn summarize_shape(shape: &Shape) -> ShapeSummary {
                 .collect::<Vec<_>>();
             let mut rendered_parts = Vec::with_capacity(values.len());
             if let Some(tag) = values.first() {
-                rendered_parts.push(render_atom(tag));
+                rendered_parts.push(render_shape(tag));
             }
             rendered_parts.extend(
                 child_summaries
@@ -157,7 +157,7 @@ fn summarize_shape(shape: &Shape) -> ShapeSummary {
             }
         }
         _ => {
-            let rendered = render_atom(shape);
+            let rendered = render_shape(shape);
             ShapeSummary {
                 features: BTreeSet::from([rendered.clone()]),
                 rendered,
@@ -169,9 +169,16 @@ fn summarize_shape(shape: &Shape) -> ShapeSummary {
     }
 }
 
-fn render_atom(value: &Shape) -> String {
+fn render_shape(value: &Shape) -> String {
     match value {
-        Shape::Vector(_) => unreachable!("shape tags are scalar"),
+        Shape::Vector(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(render_shape)
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
         Shape::Keyword(value) => format!(":{value}"),
         Shape::String(value) => clojure_string(value),
         Shape::Number(value) => value.to_string(),
