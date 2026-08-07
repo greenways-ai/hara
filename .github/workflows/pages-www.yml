@@ -40,15 +40,21 @@ jobs:
           ref: benchmark-site
           path: .benchmark-site
           fetch-depth: 1
-      - name: Checkout reviewed Hara homepage
+      - name: Checkout reviewed Hara website
         uses: actions/checkout@v4
         with:
           repository: hara-lang/hara-www
-          ref: d619302a69954fb0e405426c22d2798863c37a68
+          ref: 3acd4ecfd024ef48320239751e89c80b81fd25d0
           path: .hara-www-release
           fetch-depth: 1
-      - name: Sync reviewed homepage into the production snapshot
-        run: cp .hara-www-release/src/pages/index.astro website/src/pages/index.astro
+      - name: Sync reviewed website into the production snapshot
+        run: |
+          mkdir -p website/public/assets website/src/layouts website/src/pages website/test
+          cp .hara-www-release/src/pages/index.astro website/src/pages/index.astro
+          cp .hara-www-release/src/layouts/SiteLayout.astro website/src/layouts/SiteLayout.astro
+          cp .hara-www-release/public/assets/install-copy.js website/public/assets/install-copy.js
+          cp .hara-www-release/public/assets/install-copy.css website/public/assets/install-copy.css
+          cp .hara-www-release/test/install-copy.test.mjs website/test/install-copy.test.mjs
       - name: Verify synchronized Hara UI assets
         run: |
           node scripts/sync-hara-ui.mjs
@@ -75,11 +81,14 @@ jobs:
         run: |
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
+          node --check website/public/assets/install-copy.js
           test -s target/www/og-hara.jpg
           test -s target/www/benchmarks/index.html
           test -s target/www/benchmarks/data/catalog.json
           test -s target/www/benchmarks/data/runs.json
           test -s target/www/_headers
+          test -s target/www/assets/install-copy.js
+          test -s target/www/assets/install-copy.css
           grep -F '<title>Hara Benchmarks</title>' target/www/benchmarks/index.html
           grep -F 'id="class-comparison"' target/www/benchmarks/index.html
           grep -F 'id="language-shootout"' target/www/benchmarks/index.html
@@ -90,6 +99,9 @@ jobs:
           ! grep -Eq '(^[[:space:]]*/benchmarks|benchmarks\.hara-lang\.org)' target/www/_redirects
           grep -F 'brew install hara-lang/tap/hara' target/www/index.html
           grep -F 'https://playground.hara-lang.org/' target/www/index.html
+          grep -F '/assets/install-copy.js' target/www/index.html
+          grep -F '/assets/install-copy.css' target/www/index.html
+          grep -F 'Copy Homebrew install command' target/www/assets/install-copy.js
       - name: Deploy prod to www.testing.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
