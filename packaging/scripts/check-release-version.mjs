@@ -12,9 +12,9 @@ if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(expected || "")) {
 const files = Object.fromEntries(await Promise.all([
   "core/rust/Cargo.toml",
   "core/rust/raw/Cargo.toml",
-  "rust/compiler/Cargo.toml",
-  "rust/vm-runtime/Cargo.toml",
-  "rust/Cargo.lock",
+  "core/rust/compiler/Cargo.toml",
+  "core/rust/vm-runtime/Cargo.toml",
+  "core/rust/Cargo.lock",
   ".github/studio-runtime-release.json",
   ".github/workflows/publish-studio-runtime.yml",
   ".github/workflows/publish-rust-crates.yml",
@@ -23,13 +23,13 @@ const files = Object.fromEntries(await Promise.all([
 
 assertEqual(packageVersion(files["core/rust/Cargo.toml"]), expected, "core/rust/Cargo.toml package");
 assertEqual(packageVersion(files["core/rust/raw/Cargo.toml"]), expected, "core/rust/raw/Cargo.toml package");
-assertEqual(dependencyVersion(files["rust/compiler/Cargo.toml"], "hara-wasm"), expected,
+assertEqual(dependencyVersion(files["core/rust/compiler/Cargo.toml"], "hara-wasm"), expected,
   "hara-compiler hara-wasm dependency");
-assertEqual(dependencyVersion(files["rust/vm-runtime/Cargo.toml"], "hara-wasm"), expected,
+assertEqual(dependencyVersion(files["core/rust/vm-runtime/Cargo.toml"], "hara-wasm"), expected,
   "hara-vm hara-wasm dependency");
-assertEqual(lockVersion(files["rust/Cargo.lock"], "hara-wasm"), expected,
+assertEqual(lockVersion(files["core/rust/Cargo.lock"], "hara-wasm"), expected,
   "Cargo.lock hara-wasm package");
-assertEqual(lockVersion(files["rust/Cargo.lock"], "hara-wasm-raw"), expected,
+assertEqual(lockVersion(files["core/rust/Cargo.lock"], "hara-wasm-raw"), expected,
   "Cargo.lock hara-wasm-raw package");
 
 const studioRelease = JSON.parse(files[".github/studio-runtime-release.json"]);
