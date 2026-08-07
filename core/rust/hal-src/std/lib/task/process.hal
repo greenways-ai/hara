@@ -160,8 +160,10 @@
   ([task input params lookup env]
    [input params lookup env]))
 
-(defn invoke
-  [task & arguments]
+(defn prepare-invocation
+  "Normalises archived task arguments into serializable execution input.
+   std.lib.task.work consumes this record before dispatching native work nodes."
+  [task arguments]
   (let [arguments (vec arguments)
         marker-index (argument-index arguments)
         requires-arguments (get (task-section task :main) :args?)
@@ -176,8 +178,27 @@
         (if (empty? task-arguments)
           (task-inputs task)
           (task-inputs task input provided-params))
-        params (merge (or (task-section task :params) {}) params)
-        function (wrap-input
-                  (wrap-execute (get (task-section task :main) :fn) task)
-                  task)]
-    (apply function input params lookup env function-arguments)))
+        params (merge (or (task-section task :params) {}) params)]
+    {:input input
+     :params params
+     :lookup lookup
+     :env env
+     :args function-arguments}))
+
+(defn invoke-prepared
+  [task invocation]
+  (let [function
+        (wrap-input
+         (wrap-execute (get (task-section task :main) :fn) task)
+         task)]
+    (apply function
+           (:input invocation)
+           (:params invocation)
+           (:lookup invocation)
+           (:env invocation)
+           (:args invocation))))
+
+(defn invoke
+  [task & arguments]
+  (invoke-prepared task
+                   (prepare-invocation task arguments)))

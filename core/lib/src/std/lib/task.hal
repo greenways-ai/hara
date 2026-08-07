@@ -1,10 +1,12 @@
-;; Portable task descriptions and invocation, including Foundation-compatible
-;; invocation and display protocols.
+;; Deprecated compatibility facade. New executable values should be built and run
+;; directly through std.work.
 (ns std.lib.task
   (:require [std.lib.task.protocol :as protocol
              :refer [task-type task-name task-config]]
             [std.lib.task.process :as process]
-            [std.work.protocol :as work]
+            [std.lib.task.work :as task-work]
+            [std.work :as work]
+            [std.work.protocol :as work-protocol]
             [std.foundation.string :as string]
             [std.foundation.edn :as edn]))
 
@@ -44,22 +46,11 @@
      :summary (field task :summary)
      :params (field task :params)}))
 
-;; Existing tasks are checkpointed leaves when used as work values. The task
-;; invocation contract remains unchanged; std.work supplies the execution
-;; context and the task pipeline still owns selection, bulk processing, and
-;; reporting.
-(extend-type Task work/IWork
+;; Legacy Task values compile to native std.work graphs. The compatibility
+;; facade no longer owns execution, selection loops, retries, or lifecycle.
+(extend-type Task work-protocol/IWork
   (work-spec [task]
-    {:op :step
-     :id (symbol (protocol/task-name task))
-     :task/type (protocol/task-type task)
-     :fn (fn [input context]
-           (process/invoke
-            task
-            input
-            (or (:params context)
-                (get-in context [:work/options :params])
-                {})))}))
+    (task-work/work-spec task)))
 
 (defn task-status
   [task]
@@ -125,7 +116,10 @@
 
 (defn invoke
   [task & arguments]
-  (apply process/invoke task arguments))
+  (work/run
+   (work/local-runtime)
+   (task-work/work-value task)
+   (task-work/invocation-envelope arguments)))
 
 (extend-type Task std.protocol.ifn/IFn
   (invoke [task & arguments]
