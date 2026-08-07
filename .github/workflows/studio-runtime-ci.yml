@@ -79,12 +79,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Checkout hara-www
+      - name: Checkout pinned hara-www payload
         uses: actions/checkout@v4
         with:
           repository: hara-lang/hara-www
+          ref: 3acd4ecfd024ef48320239751e89c80b81fd25d0
           path: website/hara-www
           fetch-depth: 1
+          submodules: recursive
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -121,11 +123,11 @@ jobs:
           sha256sum -c "$CHECKSUM"
           tar -tzf "$ARCHIVE" > "$RAW_LISTING"
           sed 's#^\./##' "$RAW_LISTING" > "$LISTING"
-          grep -Fxq 'core/rust/packages/hta/index.js' "$LISTING"
-          grep -Fxq 'core/rust/packages/hta/worker.js' "$LISTING"
-          grep -Fxq 'core/rust/packages/hta/shared-worker.js' "$LISTING"
-          grep -Fxq 'core/rust/studio/supersonic.js' "$LISTING"
-          grep -Fxq 'core/rust/studio/hal/supersonic.hal' "$LISTING"
+          grep -Fxq 'rust/packages/hta/index.js' "$LISTING"
+          grep -Fxq 'rust/packages/hta/worker.js' "$LISTING"
+          grep -Fxq 'rust/packages/hta/shared-worker.js' "$LISTING"
+          grep -Fxq 'rust/studio/supersonic.js' "$LISTING"
+          grep -Fxq 'rust/studio/hal/supersonic.hal' "$LISTING"
           grep -Fxq 'examples/music/runtime/packages/hta/index.js' "$LISTING"
           grep -Fxq 'examples/music/runtime/packages/hta/worker.js' "$LISTING"
           grep -Fxq 'examples/music/runtime/packages/hta/shared-worker.js' "$LISTING"
