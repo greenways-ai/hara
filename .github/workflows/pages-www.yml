@@ -70,6 +70,9 @@ jobs:
           ln -s ../../packages/visual-language website/packages/visual-language
           rm -rf website/rust
           ln -s ../core/rust website/rust
+          mkdir -p website/lib
+          rm -rf website/lib/bench
+          ln -s ../../core/lib/bench website/lib/bench
       - uses: actions/setup-node@v4
         with:
           node-version: 22
