@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import catalogSource from "../../../lib/bench/catalog.json";
+import catalogSource from "../../../core/lib/bench/catalog.json";
 
 export type Measurement = {
   runtime: string;
@@ -39,226 +39,186 @@ type LanguageEvidence = {
 };
 export type ComparisonRow = {
   runtime: string;
-  label: string;
+  display: string;
   overallRatio: number;
   haraWins: number;
   competitorWins: number;
 };
+export type ClassComparisonRow = ComparisonRow & {
+  ratios: Record<string, number | null>;
+};
 
-type Catalog = typeof catalogSource;
-export const catalog: Catalog = catalogSource;
-const evidencePath = fileURLToPath(new URL("../../../lib/bench/results/reference-v2.json", import.meta.url));
-const languageEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/language-reference.json", import.meta.url));
-export const evidence: Evidence | null = existsSync(evidencePath)
-  ? JSON.parse(readFileSync(evidencePath, "utf8"))
-  : null;
-const languageEvidence: LanguageEvidence | null = existsSync(languageEvidencePath)
-  ? JSON.parse(readFileSync(languageEvidencePath, "utf8"))
-  : null;
+const readJson = <T>(relativePath: string, fallback: T): T => {
+  const path = fileURLToPath(new URL(relativePath, import.meta.url));
+  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) as T : fallback;
+};
 
-const classEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/class-reference.json", import.meta.url));
-const classEvidence: LanguageEvidence | null = existsSync(classEvidencePath)
-  ? JSON.parse(readFileSync(classEvidencePath, "utf8"))
-  : null;
+export const catalog = catalogSource;
+const languageEvidence = readJson<LanguageEvidence>("../../data/language-shootout-reference.json", { measurements: [] });
+const classEvidence = readJson<LanguageEvidence>("../../data/class-reference.json", { measurements: [] });
+const runtimeEvidence = readJson<Evidence>("../../data/runtime.json", { measurements: [], environment: { timestamp: "" } });
+const httpEvidence = readJson<Evidence>("../../data/http.json", { measurements: [], environment: { timestamp: "" } });
 
 export const haraRuntime = "hara-rust-full";
 export const haraClassRuntime = "hara-rust-whole-wasm-prepared";
-export const workloads = catalog.corpus.workloads;
-export const runtimeLabels: Record<string, string> = {
-  "hara-rust-full": "Hara",
+export const runtimeBaseline = "hara-rust-full";
+export const workloads = ["fib", "loop", "nested", "collatz", "tree", "binary-tree", "nqueens", "json-parse"] as const;
+export type Workload = typeof workloads[number];
+
+export const workloadMeta: Record<string, { label: string; description: string }> = {
+  fib: { label: "Fibonacci", description: "Recursive integer calls." },
+  loop: { label: "Loop", description: "Tight arithmetic loop." },
+  nested: { label: "Nested", description: "Nested arithmetic and calls." },
+  collatz: { label: "Collatz", description: "Branch-heavy integer iteration." },
+  tree: { label: "Tree", description: "Recursive tree construction." },
+  "binary-tree": { label: "Binary tree", description: "Binary tree allocation and traversal." },
+  nqueens: { label: "N-Queens", description: "Backtracking search." },
+  "json-parse": { label: "JSON", description: "JSON parsing and access." }
+};
+
+const displayNames: Record<string, string> = {
+  "hara-rust-full": "Hara native full",
+  "hara-rust-vm": "Hara native VM",
+  "hara-wasm-full": "Hara WebAssembly full",
+  "hara-wasm-vm": "Hara WebAssembly VM",
+  "hara-wasm-core": "Hara WebAssembly core",
+  "hara-truffle-full": "Hara Truffle full",
+  "hara-truffle-vm": "Hara Truffle VM",
+  "hara-jvm-full": "Hara JVM full",
+  "hara-jvm-vm": "Hara JVM VM",
+  "pypy-prepared": "PyPy",
+  "node-prepared": "Node.js",
+  "ruby-yjit-prepared": "Ruby YJIT",
+  "clojure-prepared": "Clojure",
+  "luajit-prepared": "LuaJIT",
   "sbcl-prepared": "SBCL",
   "chez-prepared": "Chez Scheme",
   "guile-prepared": "Guile",
   "bb-prepared": "Babashka",
-  "python-prepared": "Python",
   "rust-prepared": "Rust",
   "c-prepared": "C",
   "java-prepared": "Java",
-  "luajit-prepared": "LuaJIT",
-  "pypy-prepared": "PyPy",
-  "node-prepared": "Node.js / V8",
-  "ruby-yjit-prepared": "Ruby (YJIT)",
-  "clojure-prepared": "Clojure",
-  "hara-rust-whole-wasm-prepared": "Hara"
-};
-export const workloadMeta: Record<string, { label: string; summary: string }> = {
-  "sieve-array": { label: "Sieve", summary: "Integer loops and mutable array traversal." },
-  "towers-recursive": { label: "Towers", summary: "Recursive calls and stack movement." },
-  "queens-backtracking": { label: "Queens", summary: "Backtracking, branching, and board checks." },
-  "heap-permute": { label: "Heap permutation", summary: "Recursive permutation with repeated swaps." },
-  "ackermann-deep": { label: "Ackermann", summary: "Very deep recursive call pressure." },
-  "tak-branching": { label: "Tak", summary: "Branch-heavy recursive evaluation." },
-  "collatz-range": { label: "Collatz", summary: "Integer loops, conditions, and range traversal." },
-  "matrix-multiply": { label: "Matrix multiply", summary: "Nested numeric loops over array data." }
+  "python-prepared": "Python"
 };
 
-export const runtimeIndex = new Map<string, Measurement>(
-  (evidence?.measurements ?? []).map((row) => [`${row.runtime}/${row.workload}`, row])
-);
-const languageIndex = new Map<string, number>(
-  (languageEvidence?.measurements ?? [])
-    .filter((row) => row.status === "ok" && row.analysis?.steady_ns != null)
-    .map((row) => [`${row.runtime}/${row.workload}`, row.analysis!.steady_ns!])
-);
-const geometricMean = (values: number[]) =>
-  values.length ? Math.exp(values.reduce((sum, value) => sum + Math.log(value), 0) / values.length) : null;
-export const ratioFor = (runtime: string, workload: string) => {
-  const hara = languageIndex.get(`${haraRuntime}/${workload}`);
-  const candidate = languageIndex.get(`${runtime}/${workload}`);
-  return hara && candidate ? candidate / hara : null;
-};
-const overallRatioFor = (runtime: string) =>
-  geometricMean(workloads.flatMap((workload) => {
+const measurementMap = new Map(languageEvidence.measurements.map((row) => [`${row.runtime}:${row.workload}`, row]));
+const classMeasurementMap = new Map(classEvidence.measurements.map((row) => [`${row.runtime}:${row.workload}`, row]));
+const runtimeMap = new Map(runtimeEvidence.measurements.map((row) => [`${row.runtime}:${row.workload}`, row]));
+
+function steadyNs(row?: LanguageMeasurement): number | null {
+  const value = row?.analysis?.steady_ns;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function geometricMean(values: number[]): number {
+  const filtered = values.filter((value) => Number.isFinite(value) && value > 0);
+  if (!filtered.length) return 0;
+  return Math.exp(filtered.reduce((sum, value) => sum + Math.log(value), 0) / filtered.length);
+}
+
+export function ratioFor(runtime: string, workload: string): number | null {
+  const hara = steadyNs(measurementMap.get(`${haraRuntime}:${workload}`));
+  const competitor = steadyNs(measurementMap.get(`${runtime}:${workload}`));
+  return hara && competitor ? competitor / hara : null;
+}
+
+export function ratioForClass(runtime: string, workload: string): number | null {
+  const hara = steadyNs(classMeasurementMap.get(`${haraClassRuntime}:${workload}`));
+  const competitor = steadyNs(classMeasurementMap.get(`${runtime}:${workload}`));
+  return hara && competitor ? competitor / hara : null;
+}
+
+export const haraLanguageOverall = geometricMean(workloads.flatMap((workload: Workload) => {
+  const value = ratioFor(haraRuntime, workload);
+  return value ? [value] : [];
+}));
+
+export const comparisonRows: ComparisonRow[] = [
+  ...catalog.language_competitors.map((name: string) => `${name}-prepared`)
+].map((runtime: string) => {
+  const ratios = workloads.flatMap((workload: Workload) => {
     const ratio = ratioFor(runtime, workload);
-    return ratio == null ? [] : [ratio];
-  }));
+    return ratio ? [ratio] : [];
+  });
+  const haraWins = workloads.filter((workload: Workload) => (ratioFor(runtime, workload) ?? 0) > 1).length;
+  const competitorWins = workloads.filter((workload: Workload) => {
+    const ratio = ratioFor(runtime, workload);
+    return ratio !== null && ratio < 1;
+  }).length;
+  return {
+    runtime,
+    display: displayNames[runtime] ?? runtime,
+    overallRatio: geometricMean(ratios),
+    haraWins,
+    competitorWins
+  };
+});
 
-const languageRuntimes = languageEvidence?.runtime_order ?? [
-  haraRuntime,
-  ...catalog.language_competitors.map((name) => `${name}-prepared`)
-];
-export const comparisonRows: ComparisonRow[] = languageRuntimes
-  .filter((runtime) => runtime !== haraRuntime)
-  .flatMap((runtime) => {
-    const overallRatio = overallRatioFor(runtime);
-    if (overallRatio == null) return [];
-    const haraWins = workloads.filter((workload) => (ratioFor(runtime, workload) ?? 0) > 1).length;
-    const competitorWins = workloads.filter((workload) => {
-      const ratio = ratioFor(runtime, workload);
-      return ratio != null && ratio < 1;
+export const runtimeRows = catalog.artifacts.map((artifact: { id: string; host: string; representation: string; summary: string; invocation: string }) => {
+  const ratios = workloads.flatMap((workload: Workload) => {
+    const baseline = runtimeMap.get(`${runtimeBaseline}:${workload}`)?.steady_ns;
+    const value = runtimeMap.get(`${artifact.id}:${workload}`)?.steady_ns;
+    return typeof baseline === "number" && baseline > 0 && typeof value === "number" && value > 0
+      ? [value / baseline]
+      : [];
+  });
+  return {
+    ...artifact,
+    overallRatio: geometricMean(ratios)
+  };
+});
+
+function buildClassRows(runtimes: string[]): ClassComparisonRow[] {
+  return runtimes.map((runtime: string) => {
+    const ratios = Object.fromEntries(workloads.map((workload: Workload) => [workload, ratioForClass(runtime, workload)]));
+    const overallRatio = geometricMean(workloads.flatMap((workload: Workload) => {
+      const ratio = ratios[workload];
+      return ratio ? [ratio] : [];
+    }));
+    const haraWins = workloads.filter((workload: Workload) => (ratioForClass(runtime, workload) ?? 0) > 1).length;
+    const competitorWins = workloads.filter((workload: Workload) => {
+      const ratio = ratioForClass(runtime, workload);
+      return ratio !== null && ratio < 1;
     }).length;
-    return [{
+    return {
       runtime,
-      label: runtimeLabels[runtime] ?? runtime.replace(/-prepared$/, ""),
+      display: displayNames[runtime] ?? runtime,
       overallRatio,
       haraWins,
-      competitorWins
-    }];
-  })
-  .sort((left, right) => right.overallRatio - left.overallRatio);
-export const haraLeadingRows = comparisonRows.filter((row) => row.overallRatio > 1);
-export const competitorLeadingRows = comparisonRows.filter((row) => row.overallRatio < 1);
-export const sweptRows = comparisonRows.filter((row) => row.haraWins === workloads.length);
-export const maxLeadRow = haraLeadingRows.at(0) ?? null;
-export const closestRow = comparisonRows.reduce<ComparisonRow | null>((best, row) => {
-  if (!best) return row;
-  return Math.abs(Math.log(row.overallRatio)) < Math.abs(Math.log(best.overallRatio)) ? row : best;
-}, null);
+      competitorWins,
+      ratios
+    };
+  });
+}
 
-const classIndex = new Map<string, number>(
-  (classEvidence?.measurements ?? [])
-    .filter((row) => row.status === "ok" && row.analysis?.steady_ns != null)
-    .map((row) => [`${row.runtime}/${row.workload}`, row.analysis!.steady_ns!])
-);
-const classStatusIndex = new Map<string, string>(
-  (classEvidence?.measurements ?? []).map((row) => [`${row.runtime}/${row.workload}`, row.status])
-);
-export const classStatusFor = (runtime: string, workload: string) =>
-  classStatusIndex.get(`${runtime}/${workload}`) ?? "pending";
-export const ratioForClass = (runtime: string, workload: string) => {
-  const hara = classIndex.get(`${haraClassRuntime}/${workload}`);
-  const candidate = classIndex.get(`${runtime}/${workload}`);
-  return hara && candidate ? candidate / hara : null;
-};
-export const classTime = (runtime: string, workload: string) => classIndex.get(`${runtime}/${workload}`);
-const buildClassRows = (runtimes: string[]): ComparisonRow[] =>
-  runtimes
-    .flatMap((runtime) => {
-      const overallRatio = geometricMean(workloads.flatMap((workload) => {
-        const ratio = ratioForClass(runtime, workload);
-        return ratio == null ? [] : [ratio];
-      }));
-      if (overallRatio == null) return [];
-      const haraWins = workloads.filter((workload) => (ratioForClass(runtime, workload) ?? 0) > 1).length;
-      const competitorWins = workloads.filter((workload) => {
-        const ratio = ratioForClass(runtime, workload);
-        return ratio != null && ratio < 1;
-      }).length;
-      return [{
-        runtime,
-        label: runtimeLabels[runtime] ?? runtime.replace(/-prepared$/, ""),
-        overallRatio,
-        haraWins,
-        competitorWins
-      }];
-    })
-    .sort((left, right) => right.overallRatio - left.overallRatio);
-export type ClassGroup = { id: string; title: string; summary: string; rows: ComparisonRow[] };
-export const classGroups: ClassGroup[] = [
+export const classGroups = [
   {
-    id: "class",
-    title: "Best in class",
-    summary: "Hara measured first against dynamic runtimes with adaptive compilation — its own class.",
-    rows: buildClassRows(catalog.class_competitors.map((name) => `${name}-prepared`))
+    id: "dynamic",
+    label: "Dynamic runtimes",
+    description: "JIT and dynamic-language runtimes.",
+    rows: buildClassRows(catalog.class_competitors.map((name: string) => `${name}-prepared`))
   },
   {
     id: "lisp",
-    title: "Lisp family",
-    summary: "Common Lisp, Scheme and Clojure-derived runtimes, grouped separately from the dynamic-JIT claim.",
-    rows: buildClassRows(catalog.lisp_competitors.map((name) => `${name}-prepared`))
+    label: "Lisp family",
+    description: "Lisp and Scheme implementations.",
+    rows: buildClassRows(catalog.lisp_competitors.map((name: string) => `${name}-prepared`))
   },
   {
-    id: "references",
-    title: "Reference ceilings",
-    summary: "Rust, C, Java and Python remain essential context as differently coloured reference ceilings, not peers.",
-    rows: buildClassRows(catalog.reference_competitors.map((name) => `${name}-prepared`))
+    id: "reference",
+    label: "Native references",
+    description: "Rust, C, Java and Python reference implementations.",
+    rows: buildClassRows(catalog.reference_competitors.map((name: string) => `${name}-prepared`))
   }
-].filter((group) => group.rows.length > 0);
-const classTimestamp = classEvidence?.environment?.timestamp;
-export const classEvidenceDate = classTimestamp && !Number.isNaN(Date.parse(classTimestamp))
-  ? new Intl.DateTimeFormat("en-AU", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZoneName: "short"
-    }).format(new Date(classTimestamp))
-  : "reference run pending";
+];
 
-export const comparisonResult = (ratio: number | null) => {
-  if (ratio == null) return { value: "—", status: "pending", label: "pending", text: "Pending" };
-  if (Math.abs(ratio - 1) < 0.015) {
-    return { value: "1.00×", status: "parity", label: "parity", text: "Hara is effectively at parity" };
-  }
-  return ratio > 1
-    ? { value: `${ratio.toFixed(2)}×`, status: "ahead", label: "ahead", text: `Hara is ${ratio.toFixed(2)}× faster` }
-    : { value: `${(1 / ratio).toFixed(2)}×`, status: "behind", label: "behind", text: `Hara is ${(1 / ratio).toFixed(2)}× slower` };
-};
-export const formatTime = (ns: number | null | undefined) =>
-  ns == null ? "Pending" : ns < 1e6 ? `${(ns / 1e3).toFixed(1)} µs` : `${(ns / 1e6).toFixed(2)} ms`;
-export const formatRps = (value: number | null | undefined) =>
-  value == null ? "Pending" : value >= 1e3 ? `${(value / 1e3).toFixed(1)}k` : value.toFixed(1);
-export const languageTime = (runtime: string, workload: string) => languageIndex.get(`${runtime}/${workload}`);
-export const httpRows = evidence?.http_measurements ?? [];
-export const hasHttpEvidence = httpRows.length > 0;
-export const httpRoutes = [...new Set(httpRows.map((row) => row.route))];
-export const httpServers = [...new Set(httpRows.map((row) => row.server))];
-export const httpIndex = new Map<string, HttpMeasurement>(
-  httpRows.map((row) => [`${row.server}/${row.route}`, row])
-);
-export const httpBaseline = "hoplite-raw";
-export const httpRatioFor = (server: string, route: string) => {
-  const baseline = httpIndex.get(`${httpBaseline}/${route}`);
-  const candidate = httpIndex.get(`${server}/${route}`);
-  return baseline?.requests_per_second && candidate?.requests_per_second
-    ? baseline.requests_per_second / candidate.requests_per_second
-    : null;
-};
-export const runtimeBaseline = haraRuntime;
-export const steadyRatioFor = (artifact: string, workload: string) => {
-  const baseline = runtimeIndex.get(`${runtimeBaseline}/${workload}`);
-  const candidate = runtimeIndex.get(`${artifact}/${workload}`);
-  return baseline && candidate ? candidate.steady_ns / baseline.steady_ns : null;
-};
-const timestamp = languageEvidence?.environment?.timestamp ?? evidence?.environment?.timestamp;
-export const evidenceDate = timestamp && !Number.isNaN(Date.parse(timestamp))
-  ? new Intl.DateTimeFormat("en-AU", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZoneName: "short"
-    }).format(new Date(timestamp))
-  : "reference run pending";
+export const httpRows = httpEvidence.http_measurements ?? [];
+export const runtimeTimestamp = runtimeEvidence.environment.timestamp;
+export const languageTimestamp = languageEvidence.environment?.timestamp ?? "";
+export const classTimestamp = classEvidence.environment?.timestamp ?? "";
+export const httpTimestamp = httpEvidence.environment.timestamp;
+
+export function formatRatio(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "—";
+  return `${value.toFixed(value >= 10 ? 1 : 2)}×`;
+}
