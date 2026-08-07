@@ -14,7 +14,7 @@ permissions:
 jobs:
   cargo-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,6 +27,10 @@ jobs:
           path: hara-specs-registry
           fetch-depth: 1
 
+      - name: Expose registry at the path used by Rust fixtures
+        shell: bash
+        run: ln -sfn "$GITHUB_WORKSPACE/hara-specs-registry" "$GITHUB_WORKSPACE/../hara-specs-registry"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -37,6 +41,16 @@ jobs:
         run: |
           set +e
           {
+            echo '=== source analyzer whole-Wasm tests ==='
+            cargo test \
+              --manifest-path core/rust/Cargo.toml \
+              --features whole-wasm \
+              --bin hara-rust-full \
+              --bin hara-code-analyzer \
+              -- --nocapture
+            analyzer_status=$?
+            echo "analyzer_status=$analyzer_status"
+
             echo '=== cargo clippy --all-targets ==='
             cargo clippy --manifest-path core/rust/Cargo.toml --all-targets
             clippy_status=$?
@@ -52,7 +66,8 @@ jobs:
             raw_status=$?
             echo "raw_status=$raw_status"
 
-            if [ "$clippy_status" -ne 0 ] || [ "$test_status" -ne 0 ] || [ "$raw_status" -ne 0 ]; then
+            if [ "$analyzer_status" -ne 0 ] || [ "$clippy_status" -ne 0 ] || \
+               [ "$test_status" -ne 0 ] || [ "$raw_status" -ne 0 ]; then
               exit 1
             fi
           } 2>&1 | tee source-analyzer-check.log
@@ -74,7 +89,7 @@ jobs:
             echo "Exit status: **$STATUS**"
             echo
             echo '```text'
-            tail -n 700 source-analyzer-check.log
+            tail -n 900 source-analyzer-check.log
             echo '```'
           } > source-analyzer-comment.md
           existing=$(gh api /repos/${GITHUB_REPOSITORY}/issues/374/comments \
