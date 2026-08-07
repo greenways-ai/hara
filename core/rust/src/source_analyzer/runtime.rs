@@ -34,6 +34,7 @@ struct SourceAnalyzer {
 
 impl SourceAnalyzer {
     fn compile(source: &str) -> Result<Self, String> {
+        let descriptor_value = descriptor_value(source)?;
         let mut program = crate::vm::compile_source(source).map_err(|error| error.to_string())?;
         program.namespace = Some(ANALYZER_NAMESPACE.to_owned());
         program.function_types = declared_function_types(source)?;
@@ -50,10 +51,8 @@ impl SourceAnalyzer {
         }
 
         let artifact = crate::whole_wasm::compile_artifact(&program)?;
-        let mut module = NativeModule::load(&artifact)?;
-        let describe_function = find_function(&module, "describe")?;
+        let module = NativeModule::load(&artifact)?;
         let analyze_function = find_function(&module, "analyze")?;
-        let descriptor_value = module.call_value(describe_function, &[])?;
         let fingerprint = sha256(
             [
                 source.as_bytes(),
@@ -171,6 +170,43 @@ fn find_function(module: &NativeModule, local_name: &str) -> Result<FunctionId, 
         })
         .map(|index| index as FunctionId)
         .ok_or_else(|| format!("compiled analyzer has no {local_name} function"))
+}
+
+fn descriptor_value(source: &str) -> Result<Value, String> {
+    for spanned in read_forms(source).map_err(|error| error.to_string())? {
+        let Form::List(items) = spanned.form else {
+            continue;
+        };
+        if !matches!(items.first(), Some(Form::Symbol(operator)) if operator == "defn" || operator == "defn-") {
+            continue;
+        }
+        let Some((name, _)) = items.get(1).and_then(definition_metadata) else {
+            continue;
+        };
+        if name != "describe" {
+            continue;
+        }
+        let body = items
+            .last()
+            .ok_or("analyzer describe has no body")?;
+        return descriptor_form_value(body);
+    }
+    Err("analyzer module has no describe function".into())
+}
+
+fn descriptor_form_value(form: &Form) -> Result<Value, String> {
+    match form {
+        Form::String(value) => Ok(Value::String(value.clone())),
+        Form::Number(value) => Ok(Value::Number(*value)),
+        Form::Vector(values) => values
+            .iter()
+            .map(descriptor_form_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map(value_vector),
+        _ => Err(format!(
+            "analyzer describe must return a literal string/number/vector tree, got {form}"
+        )),
+    }
 }
 
 fn declared_function_types(source: &str) -> Result<HashMap<String, SchemaType>, String> {
