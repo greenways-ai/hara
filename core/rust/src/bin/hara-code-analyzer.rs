@@ -1,5 +1,7 @@
 pub use hara_wasm::{core, kernel, lang, vm, whole_wasm};
 
+#[path = "hara-code-analyzer/json.rs"]
+mod json;
 #[path = "../source_analyzer.rs"]
 mod source_analyzer;
 
