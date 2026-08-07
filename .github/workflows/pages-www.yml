@@ -44,6 +44,13 @@ jobs:
           ref: 563edc868ebd3bca018f6102f706a6600b5d0722
           path: website/docs
           fetch-depth: 1
+      - name: Checkout reviewed visual-language release
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/visual-language
+          ref: a4db9548bdcad7887824890b0bb259da26e402c7
+          path: packages/visual-language
+          fetch-depth: 1
       - name: Checkout reviewed hara-www popup release
         uses: actions/checkout@v4
         with:
