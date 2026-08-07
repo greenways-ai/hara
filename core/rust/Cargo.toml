@@ -80,4 +80,9 @@ name = "hara-bytecode-artifact"
 path = "src/bin/hara-bytecode-artifact.rs"
 required-features = ["bytecode-vm"]
 
+[[bin]]
+name = "hara-code-analyzer"
+path = "src/bin/hara-code-analyzer.rs"
+required-features = ["whole-wasm"]
+
 [dev-dependencies]
