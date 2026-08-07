@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const catalog = JSON.parse(await readFile(new URL("../../lib/bench/catalog.json", import.meta.url)));
-const classEvidence = JSON.parse(await readFile(new URL("../../lib/bench/results/class-reference.json", import.meta.url)));
+const catalog = JSON.parse(await readFile(new URL("../../core/lib/bench/catalog.json", import.meta.url)));
+const classEvidence = JSON.parse(await readFile(new URL("../../core/lib/bench/results/class-reference.json", import.meta.url)));
 const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
 const language = await readFile(new URL("../src/components/LanguagePanel.astro", import.meta.url), "utf8");
 const classPanel = await readFile(new URL("../src/components/ClassPanel.astro", import.meta.url), "utf8");
@@ -12,7 +12,7 @@ const reference = await readFile(new URL("../src/components/RuntimeReference.ast
 const header = await readFile(new URL("../src/components/SiteHeader.astro", import.meta.url), "utf8");
 const data = await readFile(new URL("../src/lib/benchmark-data.ts", import.meta.url), "utf8");
 const languageStyles = await readFile(new URL("../src/styles/language.css", import.meta.url), "utf8");
-const installer = await readFile(new URL("../../scripts/install-benchmark-site", import.meta.url), "utf8");
+const installer = await readFile(new URL("../../packaging/scripts/install-benchmark-site", import.meta.url), "utf8");
 const source = [page, language, classPanel, http, reference, header, data].join("\n");
 const indexOf = (value) => { const index = language.indexOf(value); assert.notEqual(index, -1, `Expected language panel to contain ${value}`); return index; };
 
