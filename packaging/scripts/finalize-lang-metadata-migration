@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Finalize the generated HARA-2 tree and remove one-shot machinery."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def rewrite(relative: str, old: str, new: str) -> None:
+    path = ROOT / relative
+    source = path.read_text(encoding="utf-8")
+    if new in source:
+        return
+    if old not in source:
+        raise SystemExit(f"finalization anchor not found in {relative}: {old[:100]!r}")
+    path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+
+def fix_eval_plugin() -> None:
+    rewrite(
+        "core/lib/src/lang/core/eval.hal",
+        ':registered (keys (deref +plugins+))}))))\n\n(defn request',
+        ':registered (keys (deref +plugins+))})))))\n\n(defn request',
+    )
+
+
+def canonicalize_analysis_outputs() -> None:
+    path = "core/lib/src/lang/common/compiler.hal"
+    rewrite(
+        path,
+        "        inference\n        (run-phase\n         :infer selected context",
+        "        inference\n        (compat/canonicalize-map\n         (run-phase\n          :infer selected context",
+    )
+    rewrite(
+        path,
+        "                                canonical selected current)))\n        events (append-event events :infer inference context)",
+        "                                canonical selected current))))\n        events (append-event events :infer inference context)",
+    )
+    rewrite(
+        path,
+        "        diagnostics\n        (vec\n         (run-phase\n          :lint selected (assoc context :inference inference)\n          (fn [current]\n            (protocol/lint-form (:linter compiler)\n                                canonical inference selected current))))",
+        "        diagnostics\n        (vec\n         (map compat/canonicalize-map\n              (run-phase\n               :lint selected (assoc context :inference inference)\n               (fn [current]\n                 (protocol/lint-form (:linter compiler)\n                                     canonical inference selected current)))))",
+    )
+
+
+def strengthen_fixture_guard() -> None:
+    rewrite(
+        "packaging/scripts/check-no-tahto-language-metadata",
+        'legacy_fixture = REPOSITORY / "core/spec/fixtures/lang-metadata-v1/legacy.edn"\ncanonical_fixture = REPOSITORY / "core/spec/fixtures/lang-metadata-v1/canonical.edn"\nif not legacy_fixture.is_file() or ":tahto/" not in legacy_fixture.read_text(encoding="utf-8"):\n    errors.append("legacy language metadata fixture is missing or vacuous")\nif not canonical_fixture.is_file():',
+        'legacy_fixture = REPOSITORY / "core/spec/fixtures/lang-metadata-v1/legacy.edn"\ncanonical_fixture = REPOSITORY / "core/spec/fixtures/lang-metadata-v1/canonical.edn"\nlegacy = legacy_fixture.read_text(encoding="utf-8") if legacy_fixture.is_file() else ""\nif not legacy or ":tahto/" not in legacy:\n    errors.append("legacy language metadata fixture is missing or vacuous")\nif not canonical_fixture.is_file():',
+    )
+    rewrite(
+        "packaging/scripts/check-no-tahto-language-metadata",
+        '    if PATTERN.search(canonical):\n        errors.append("canonical language metadata fixture contains a legacy key")\n\nif errors:',
+        '    if PATTERN.search(canonical):\n        errors.append("canonical language metadata fixture contains a legacy key")\n    expected = legacy.replace(":tahto/", ":lang/").replace(":tahto.", ":lang.")\n    if expected != canonical:\n        errors.append("canonical language metadata fixture is not the mechanical legacy mapping")\n\nif errors:',
+    )
+
+
+def remove_one_shot_files() -> None:
+    pycache = ROOT / "packaging/scripts/__pycache__"
+    if pycache.exists():
+        for path in pycache.iterdir():
+            if path.is_file():
+                path.unlink()
+        pycache.rmdir()
+
+    for relative in (
+        ".github/workflows/generate-lang-metadata-migration.yml",
+        "packaging/scripts/migrate-tahto-metadata-to-lang",
+        "packaging/scripts/run-lang-metadata-migration",
+        "packaging/scripts/finalize-lang-metadata-migration",
+    ):
+        (ROOT / relative).unlink(missing_ok=True)
+
+
+def run(*arguments: str) -> None:
+    subprocess.run(arguments, cwd=ROOT, check=True)
+
+
+def main() -> None:
+    fix_eval_plugin()
+    canonicalize_analysis_outputs()
+    strengthen_fixture_guard()
+    os.chmod(ROOT / "packaging/scripts/check-no-tahto-language-metadata", 0o755)
+
+    run("python3", "packaging/scripts/sync-rust-hal-src")
+    remove_one_shot_files()
+    run("python3", "packaging/scripts/check-language-source-layout")
+    run("python3", "packaging/scripts/check-no-tahto-namespaces")
+    run("python3", "packaging/scripts/check-no-tahto-language-metadata")
+    run("python3", "packaging/scripts/sync-rust-hal-src", "--check")
+    run("git", "diff", "--check")
+    print("finalized HARA-2 and removed one-shot generation machinery")
+
+
+if __name__ == "__main__":
+    main()
