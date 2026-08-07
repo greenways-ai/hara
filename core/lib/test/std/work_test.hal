@@ -226,11 +226,13 @@
     {:echo 7 :node :custom})
 
    (test/check
-    "existing std.lib.task values are step work"
-    [(get (work/work-spec double-task) :op)
-     (get (work/work-spec double-task) :id)
-     (work/run (work/local-runtime) double-task 4)]
-    [:step 'double-task 8])
+    "legacy std.lib.task values compile to native work graphs"
+    (let [spec (work/work-spec double-task)]
+      [(get spec :op)
+       (get spec :id)
+       (get (work/work-spec (nth (:children spec) 1)) :op)
+       (work/run (work/local-runtime) double-task 4)])
+    [:chain 'double-task :choose 8])
 
    (test/check
     "durable recovery replays checkpoints and reruns pure work"
