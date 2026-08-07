@@ -63,11 +63,13 @@ jobs:
           fetch-depth: 1
           submodules: recursive
           persist-credentials: false
-      - name: Link visual language into the nested www workspace
+      - name: Link reviewed dependencies into the nested www workspace
         run: |
           mkdir -p website/packages
           rm -rf website/packages/visual-language
           ln -s ../../packages/visual-language website/packages/visual-language
+          rm -rf website/rust
+          ln -s ../core/rust website/rust
       - uses: actions/setup-node@v4
         with:
           node-version: 22
