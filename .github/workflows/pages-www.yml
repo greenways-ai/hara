@@ -51,6 +51,9 @@ jobs:
           ref: a4db9548bdcad7887824890b0bb259da26e402c7
           path: packages/visual-language
           fetch-depth: 1
+          persist-credentials: false
+      - name: Remove the vendored hara-www snapshot
+        run: rm -rf website/hara-www
       - name: Checkout reviewed hara-www popup release
         uses: actions/checkout@v4
         with:
@@ -59,11 +62,24 @@ jobs:
           path: website/hara-www
           fetch-depth: 1
           submodules: recursive
+          persist-credentials: false
+      - name: Link reviewed dependencies into the nested www workspace
+        run: |
+          mkdir -p website/packages
+          rm -rf website/packages/visual-language
+          ln -s ../../packages/visual-language website/packages/visual-language
+          rm -rf website/rust
+          ln -s ../core/rust website/rust
+          mkdir -p website/lib
+          rm -rf website/lib/bench
+          ln -s ../../core/lib/bench website/lib/bench
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: website/hara-www/package-lock.json
+          cache-dependency-path: |
+            website/hara-www/package-lock.json
+            benchmarks/package-lock.json
       - name: Install Astro site dependencies
         run: |
           npm ci --prefix website/hara-www
@@ -85,7 +101,7 @@ jobs:
           test -s core/target/www/benchmarks/data/catalog.json
           test -s core/target/www/benchmarks/data/runs.json
           grep -F '<meta name="hara-identity-mode" content="popup"' core/target/www/index.html
-          grep -F '<meta name="hara-identity-mode" content="popup"' core/target/www/docs/start/orientation/index.html
+          grep -F '<meta name="hara-identity-auto" content="starlight"' core/target/www/docs/start/orientation/index.html
           grep -F '<title>Hara Benchmarks</title>' core/target/www/benchmarks/index.html
           grep -F 'id="class-comparison"' core/target/www/benchmarks/index.html
           grep -F 'id="language-shootout"' core/target/www/benchmarks/index.html
