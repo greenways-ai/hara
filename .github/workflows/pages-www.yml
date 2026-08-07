@@ -162,9 +162,10 @@ jobs:
           grep -Fq '/assets/install-copy.js' target/www/index.html
           grep -Fq '/assets/install-copy.css' target/www/index.html
           grep -Fq 'Copy Homebrew install command' target/www/assets/install-copy.js
-      - name: Verify generated shared identity shell
+      - name: Verify generated popup identity shell
         run: |
           set -Eeuo pipefail
+          grep -Fq '<meta name="hara-identity-mode" content="popup"' target/www/index.html
           grep -Fq 'data-hara-identity' target/www/index.html
           grep -Fq 'data-hara-identity-fallback' target/www/index.html
           grep -Fq '/assets/identity-loader.js' target/www/index.html
