@@ -32,12 +32,24 @@ jobs:
           ref: benchmark-site
           path: .benchmark-site
           fetch-depth: 1
+      - name: Checkout shared visual language
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/visual-language
+          ref: a4db9548bdcad7887824890b0bb259da26e402c7
+          path: packages/visual-language
+          fetch-depth: 1
+          persist-credentials: false
       - name: Checkout hara-www
         uses: actions/checkout@v4
         with:
           repository: hara-lang/hara-www
           path: website/hara-www
           fetch-depth: 1
+      - name: Link visual language into the nested www workspace
+        run: |
+          mkdir -p website/packages
+          ln -s ../../packages/visual-language website/packages/visual-language
       - uses: actions/setup-node@v4
         with:
           node-version: 22

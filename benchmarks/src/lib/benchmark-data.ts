@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import catalogSource from "../../../lib/bench/catalog.json";
+import catalogSource from "../../../core/lib/bench/catalog.json";
 
 export type Measurement = {
   runtime: string;
@@ -47,8 +47,8 @@ export type ComparisonRow = {
 
 type Catalog = typeof catalogSource;
 export const catalog: Catalog = catalogSource;
-const evidencePath = fileURLToPath(new URL("../../../lib/bench/results/reference-v2.json", import.meta.url));
-const languageEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/language-reference.json", import.meta.url));
+const evidencePath = fileURLToPath(new URL("../../../core/lib/bench/results/reference-v2.json", import.meta.url));
+const languageEvidencePath = fileURLToPath(new URL("../../../core/lib/bench/results/language-reference.json", import.meta.url));
 export const evidence: Evidence | null = existsSync(evidencePath)
   ? JSON.parse(readFileSync(evidencePath, "utf8"))
   : null;
@@ -56,7 +56,7 @@ const languageEvidence: LanguageEvidence | null = existsSync(languageEvidencePat
   ? JSON.parse(readFileSync(languageEvidencePath, "utf8"))
   : null;
 
-const classEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/class-reference.json", import.meta.url));
+const classEvidencePath = fileURLToPath(new URL("../../../core/lib/bench/results/class-reference.json", import.meta.url));
 const classEvidence: LanguageEvidence | null = existsSync(classEvidencePath)
   ? JSON.parse(readFileSync(classEvidencePath, "utf8"))
   : null;
