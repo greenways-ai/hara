@@ -37,10 +37,11 @@ jobs:
           ref: benchmark-site
           path: .benchmark-site
           fetch-depth: 1
-      - name: Checkout hara-www
+      - name: Checkout reviewed hara-www popup release
         uses: actions/checkout@v4
         with:
           repository: hara-lang/hara-www
+          ref: 320aed54f40d4d85d3140fdc67b13144516bea58
           path: website/hara-www
           fetch-depth: 1
       - uses: actions/setup-node@v4
@@ -68,6 +69,8 @@ jobs:
           test -s core/target/www/benchmarks/index.html
           test -s core/target/www/benchmarks/data/catalog.json
           test -s core/target/www/benchmarks/data/runs.json
+          grep -F '<meta name="hara-identity-mode" content="popup"' core/target/www/index.html
+          grep -F '<meta name="hara-identity-mode" content="popup"' core/target/www/docs/start/orientation/index.html
           grep -F '<title>Hara Benchmarks</title>' core/target/www/benchmarks/index.html
           grep -F 'id="class-comparison"' core/target/www/benchmarks/index.html
           grep -F 'id="language-shootout"' core/target/www/benchmarks/index.html
