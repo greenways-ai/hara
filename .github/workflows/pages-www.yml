@@ -47,11 +47,10 @@ jobs:
           ref: 3acd4ecfd024ef48320239751e89c80b81fd25d0
           path: .hara-www-release
           fetch-depth: 1
-      - name: Sync reviewed website into the production snapshot
+      - name: Sync reviewed homepage and copy assets into the production snapshot
         run: |
-          mkdir -p website/public/assets website/src/layouts website/src/pages website/test
+          mkdir -p website/public/assets website/src/pages website/test
           cp .hara-www-release/src/pages/index.astro website/src/pages/index.astro
-          cp .hara-www-release/src/layouts/SiteLayout.astro website/src/layouts/SiteLayout.astro
           cp .hara-www-release/public/assets/install-copy.js website/public/assets/install-copy.js
           cp .hara-www-release/public/assets/install-copy.css website/public/assets/install-copy.css
           cp .hara-www-release/test/install-copy.test.mjs website/test/install-copy.test.mjs
