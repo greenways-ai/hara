@@ -85,4 +85,9 @@ name = "hara-code-analyzer"
 path = "src/bin/hara-code-analyzer.rs"
 required-features = ["whole-wasm"]
 
+[[bin]]
+name = "hara-rust-full"
+path = "src/bin/hara-rust-full.rs"
+required-features = ["whole-wasm"]
+
 [dev-dependencies]
