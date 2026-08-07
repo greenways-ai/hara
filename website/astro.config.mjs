@@ -20,6 +20,8 @@ export default defineConfig({
       description: "A small, high-performance Lisp for learning to build software from first principles.",
       favicon: "/assets/hara-favicon.svg",
       head: [
+        { tag: "meta", attrs: { name: "hara-identity-auto", content: "starlight" } },
+        { tag: "script", attrs: { src: "/assets/identity-loader.js", defer: true } },
         { tag: "link", attrs: { rel: "stylesheet", href: "/docs-assets/stylesheets/syllabus.css" } },
         { tag: "link", attrs: { rel: "stylesheet", href: "/docs-assets/live/style.css" } },
         { tag: "script", attrs: { type: "module", src: "/assets/docs-repl.js" } },
