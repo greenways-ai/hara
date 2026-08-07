@@ -54,9 +54,9 @@ docs="$tmpdir/docs.html"
 fetch_page "/" "$home"
 fetch_page "/docs/start/orientation/" "$docs"
 
-for marker in 'data-hara-identity' 'data-hara-identity-fallback' '/assets/identity-loader.js'; do
+for marker in 'hara-identity-mode' 'content="popup"' 'data-hara-identity' 'data-hara-identity-fallback' '/assets/identity-loader.js'; do
   if ! grep -Fq "$marker" "$home"; then
-    echo "${site_origin}/ is missing the shared identity marker: ${marker}" >&2
+    echo "${site_origin}/ is missing the popup identity marker: ${marker}" >&2
     exit 1
   fi
 done
@@ -153,5 +153,9 @@ if ! grep -q 'HaraIdentity' "$client"; then
   echo "The versioned shared identity client is unavailable." >&2
   exit 1
 fi
+if ! grep -q 'hara_identity_popup' "$client"; then
+  echo "The versioned shared identity client does not support popup completion." >&2
+  exit 1
+fi
 
-echo "Verified shared Hara identity contract v1 for www and Docs at ${site_origin}."
+echo "Verified popup Hara identity contract v1 for www and Docs at ${site_origin}."
