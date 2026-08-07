@@ -14,23 +14,39 @@ permissions:
 jobs:
   cargo-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
-      - name: Check source analyzer binaries
+      - name: Reproduce Core CI Rust validation
         id: check
         shell: bash
         run: |
           set +e
-          cargo check \
-            --manifest-path core/rust/Cargo.toml \
-            --features whole-wasm \
-            --bin hara-rust-full \
-            --bin hara-code-analyzer \
-            2>&1 | tee source-analyzer-check.log
+          {
+            echo '=== cargo clippy --all-targets ==='
+            cargo clippy --manifest-path core/rust/Cargo.toml --all-targets
+            clippy_status=$?
+            echo "clippy_status=$clippy_status"
+
+            echo '=== cargo test core/rust ==='
+            cargo test --manifest-path core/rust/Cargo.toml
+            test_status=$?
+            echo "test_status=$test_status"
+
+            echo '=== cargo test core/rust/raw ==='
+            cargo test --manifest-path core/rust/raw/Cargo.toml
+            raw_status=$?
+            echo "raw_status=$raw_status"
+
+            if [ "$clippy_status" -ne 0 ] || [ "$test_status" -ne 0 ] || [ "$raw_status" -ne 0 ]; then
+              exit 1
+            fi
+          } 2>&1 | tee source-analyzer-check.log
           status=${PIPESTATUS[0]}
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
@@ -44,12 +60,12 @@ jobs:
           marker='<!-- hara-source-analyzer-diagnostic -->'
           {
             echo "$marker"
-            echo "## Source analyzer Cargo check"
+            echo "## Source analyzer Core CI diagnostic"
             echo
             echo "Exit status: **$STATUS**"
             echo
             echo '```text'
-            tail -n 500 source-analyzer-check.log
+            tail -n 700 source-analyzer-check.log
             echo '```'
           } > source-analyzer-comment.md
           existing=$(gh api /repos/${GITHUB_REPOSITORY}/issues/374/comments \
@@ -61,6 +77,6 @@ jobs:
             gh pr comment 374 --body-file source-analyzer-comment.md
           fi
 
-      - name: Fail when Cargo check failed
+      - name: Fail when Core CI validation failed
         if: steps.check.outputs.status != '0'
         run: exit 1
