@@ -1,0 +1,273 @@
+(ns std.lib.task.work
+  (:require [std.lib.task.protocol :as protocol]
+            [std.lib.task.process :as process]
+            [std.lib.task.bulk :as bulk]
+            [std.lib.task.print :as print]
+            [std.foundation.string :as string]
+            [std.work :as work]))
+
+(defn invocation-envelope
+  [arguments]
+  {:task/invocation true
+   :task/arguments (vec arguments)})
+
+(defn invocation-envelope?
+  [input]
+  (and (map? input)
+       (= true (:task/invocation input))
+       (has? input :task/arguments)))
+
+(defn invocation-arguments
+  [input context]
+  (if (invocation-envelope? input)
+    (:task/arguments input)
+    (let [params (or (:params context)
+                     (get-in context [:work/options :params]))]
+      (if params
+        [input params]
+        [input]))))
+
+(defn prepare-invocation
+  [task input context]
+  (process/prepare-invocation
+   task
+   (invocation-arguments input context)))
+
+(defn selector-input?
+  [input]
+  (or (keyword? input)
+      (symbol? input)
+      (string? input)
+      (vector? input)
+      (set? input)
+      (list? input)))
+
+(defn invocation-mode
+  [task invocation]
+  (let [input (:input invocation)
+        item (protocol/task-section task :item)
+        selectable (not (nil? (get item :list)))]
+    (cond
+      (and selectable (= input :list)) :list
+      (and selectable (selector-input? input)) :bulk
+      (vector? input) :bulk
+      :else :single)))
+
+(defn task-function
+  [task]
+  (process/wrap-execute
+   (get (protocol/task-section task :main) :fn)
+   task))
+
+(defn run-single
+  [task invocation context]
+  (apply (task-function task)
+         (:input invocation)
+         (:params invocation)
+         (:lookup invocation)
+         (:env invocation)
+         (:args invocation)))
+
+(defn list-values
+  [task invocation context]
+  (let [item (protocol/task-section task :item)
+        list-function (get item :list)]
+    (if list-function
+      (vec (list-function (:lookup invocation)
+                          (:env invocation)))
+      (throw
+       (ex-info "No :item/:list function defined"
+                {:key [:item :list]})))))
+
+(defn selected-inputs
+  [task invocation]
+  (let [input (:input invocation)
+        item (protocol/task-section task :item)
+        selectable (not (nil? (get item :list)))]
+    (if selectable
+      (process/select-inputs task
+                             (:lookup invocation)
+                             (:env invocation)
+                             input)
+      (vec input))))
+
+(defn display-for-inputs
+  [inputs]
+  (let [total (count inputs)
+        index-length (+ 4 (string/length (str total)))
+        input-length
+        (+ 2
+           (reduce (fn [length input]
+                     (max length (string/length (str input))))
+                   0
+                   inputs))]
+    (bulk/bulk-display index-length input-length)))
+
+(defn start-bulk
+  [task invocation context]
+  (let [inputs (selected-inputs task invocation)
+        params (:params invocation)
+        reporter (or (:reporter params) bulk/+null-reporter+)
+        clock (or (:clock params) bulk/+zero-clock+)
+        start (bulk/now-ms clock)
+        printing (:print params)
+        title (:title params)]
+    (if (and title
+             (or (:function printing)
+                 (:item printing)
+                 (:result printing)
+                 (:summary printing)))
+      (print/print-title
+       (if (fn? title)
+         (title params (:env invocation))
+         title))
+      nil)
+    (bulk/report! reporter
+                  {:event :task/bulk-start
+                   :count (count inputs)})
+    (if (get-in params [:print :item])
+      (do
+        (println)
+        (print/print-subtitle
+         (str "ITEMS (" (count inputs) ")"))
+        (println))
+      nil)
+    (assoc invocation
+           :bulk/inputs inputs
+           :bulk/start start
+           :bulk/display (display-for-inputs inputs)
+           :bulk/params (assoc params :bulk true))))
+
+(defn bulk-manifest
+  [invocation context]
+  (let [inputs (:bulk/inputs invocation)
+        total (count inputs)
+        display (:bulk/display invocation)]
+    (loop [index 0
+           output []]
+      (if (= index total)
+        output
+        (let [input (nth inputs index)]
+          (recur
+           (inc index)
+           (conj output
+                 {:item/id [index input]
+                  :item/value
+                  {:task/input input
+                   :task/index index
+                   :task/total total
+                   :task/display display
+                   :task/invocation invocation}})))))))
+
+(defn process-bulk-item
+  [task item context]
+  (let [invocation (:task/invocation item)]
+    (bulk/bulk-process-item
+     (protocol/task-definition task)
+     (task-function task)
+     (:task/input item)
+     (:bulk/params invocation)
+     (:lookup invocation)
+     (:env invocation)
+     (:args invocation)
+     (:task/index item)
+     (:task/total item)
+     (:task/display item))))
+
+(defn manifest-results
+  [manifest]
+  (vec
+   (map (fn [item] (:item/value item))
+        manifest)))
+
+(defn finish-bulk
+  [task invocation batch context]
+  (let [params (:params invocation)
+        reporter (or (:reporter params) bulk/+null-reporter+)
+        clock (or (:clock params) bulk/+zero-clock+)
+        task-definition (protocol/task-definition task)
+        items (manifest-results (:results batch))
+        elapsed (- (bulk/now-ms clock)
+                   (:bulk/start invocation))
+        warnings (bulk/bulk-warnings params items)
+        errors (bulk/bulk-errors params items)
+        results (bulk/bulk-results task-definition params items)
+        summary
+        (bulk/bulk-summary task-definition
+                           params
+                           items
+                           results
+                           warnings
+                           errors
+                           elapsed)
+        bundle {:items items
+                :results results
+                :warnings warnings
+                :errors errors
+                :summary summary}
+        output
+        (bulk/bulk-package task-definition
+                           bundle
+                           (or (:return params) :results)
+                           (or (:package params) :map))]
+    (bulk/report! reporter
+                  {:event :task/bulk-end
+                   :summary summary})
+    output))
+
+(defn bulk-work
+  [task]
+  (work/chain
+   {:id :task/bulk}
+   [(work/step :task/bulk-start
+      (fn [invocation context]
+        (start-bulk task invocation context)))
+    (work/all
+     {:id :task/bulk-execution}
+     [(work/pure :task/bulk-input
+        (fn [invocation context]
+          invocation))
+      (work/batch
+       {:id :task/batch}
+       {:list
+        (work/pure :task/list-items
+          bulk-manifest)
+        :process
+        (work/step :task/process-item
+          (fn [item context]
+            (process-bulk-item task item context)))})])
+    (work/step :task/summarise
+      (fn [outputs context]
+        (finish-bulk task
+                     (nth outputs 0)
+                     (nth outputs 1)
+                     context)))]))
+
+(defn work-value
+  [task]
+  (work/chain
+   {:id (symbol (protocol/task-name task))
+    :version 1
+    :task/type (protocol/task-type task)}
+   [(work/step :task/prepare
+      (fn [input context]
+        (prepare-invocation task input context)))
+    (work/choose
+     {:id :task/dispatch}
+     (work/pure :task/mode
+       (fn [invocation context]
+         (invocation-mode task invocation)))
+     {:list
+      (work/step :task/list
+        (fn [invocation context]
+          (list-values task invocation context)))
+      :single
+      (work/step :task/single
+        (fn [invocation context]
+          (run-single task invocation context)))
+      :bulk
+      (bulk-work task)})]))
+
+(defn work-spec
+  [task]
+  (work/work-spec (work-value task)))
