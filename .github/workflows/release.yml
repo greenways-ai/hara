@@ -131,12 +131,14 @@ jobs:
         ref: ${{ needs.guard.outputs.tag }}
         fetch-depth: 0
 
-    - name: Checkout hara-www
+    - name: Checkout pinned hara-www payload
       uses: actions/checkout@v4
       with:
         repository: hara-lang/hara-www
+        ref: 3acd4ecfd024ef48320239751e89c80b81fd25d0
         path: website/hara-www
         fetch-depth: 1
+        submodules: recursive
 
     - uses: dtolnay/rust-toolchain@stable
       with:

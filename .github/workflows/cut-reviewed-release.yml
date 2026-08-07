@@ -41,6 +41,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       commit: ${{ steps.release.outputs.commit }}
       workflow: ${{ steps.release.outputs.workflow }}
+      skip: ${{ steps.release.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,6 +81,11 @@ jobs:
             else
               mapfile -t MANIFESTS < <(git diff --name-only "$BASE" "$HEAD" -- '.github/releases/*.json' | sort -u)
             fi
+            if [ "${#MANIFESTS[@]}" -eq 0 ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "No reviewed release manifest changed; skipping immutable release validation."
+              exit 0
+            fi
             [ "${#MANIFESTS[@]}" -eq 1 ] || {
               printf 'release cut must change exactly one manifest; found %s\n' "${#MANIFESTS[@]}" >&2
               printf '  %s\n' "${MANIFESTS[@]}" >&2
@@ -92,6 +98,7 @@ jobs:
           node packaging/scripts/release-cut.mjs github-output "$MANIFEST" >> "$GITHUB_OUTPUT"
 
       - name: Verify the immutable target and release source
+        if: steps.release.outputs.skip != 'true'
         shell: bash
         env:
           TAG: ${{ steps.release.outputs.tag }}
@@ -127,7 +134,7 @@ jobs:
           fi
 
   cut:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.validate.outputs.skip != 'true'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -245,8 +252,8 @@ jobs:
           LISTING="$RUNNER_TEMP/hara-studio-runtime-$VERSION.files"
           tar -tzf "$ARCHIVE" | sed 's#^\./##' > "$LISTING"
           for path in \
-            core/rust/studio/supersonic.js \
-            core/rust/studio/hal/supersonic.hal \
+            rust/studio/supersonic.js \
+            rust/studio/hal/supersonic.hal \
             examples/music/runtime/studio/supersonic.js \
             examples/music/runtime/studio/hal/supersonic.hal; do
             grep -Fxq "$path" "$LISTING" || {
