@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn shared_outcome_conformance_cases_pass() {
         let document = parse(include_str!(
-            "../../../../hara-specs-registry/02-platform/000001-cli/draft/conformance/outcomes.edn"
+            "../../../hara-specs-registry/02-platform/000001-cli/draft/conformance/outcomes.edn"
         ))
         .unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn shared_route_conformance_cases_pass() {
         let document = parse(include_str!(
-            "../../../../hara-specs-registry/02-platform/000001-cli/draft/conformance/routes.edn"
+            "../../../hara-specs-registry/02-platform/000001-cli/draft/conformance/routes.edn"
         ))
         .unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {
