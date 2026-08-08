@@ -96,6 +96,7 @@ jobs:
         if: steps.scope.outputs.run_core == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
+          targets: wasm32-unknown-unknown
           components: clippy
 
       - name: Check Rust module layout
@@ -110,6 +111,16 @@ jobs:
           cargo clippy --manifest-path core/rust/Cargo.toml --all-targets
           cargo test --manifest-path core/rust/Cargo.toml
           cargo test --manifest-path core/rust/raw/Cargo.toml
+          cargo clippy --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            --lib --no-deps
+          cargo test --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            vm::session:: --lib
+          cargo check --manifest-path core/rust/Cargo.toml \
+            --target wasm32-unknown-unknown \
+            --features bytecode-observation \
+            --lib
 
       - name: Set up JDK 21
         if: steps.scope.outputs.run_core == 'true'
