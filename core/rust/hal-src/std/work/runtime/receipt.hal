@@ -1,0 +1,66 @@
+(ns std.work.runtime.receipt)
+
+(defn disabled-provider
+  []
+  {:provider/role :work/receipt
+   :provider/id :disabled
+   :provider/capabilities #{}
+   :provider/operations {}})
+
+(defn provider-operations
+  [provider]
+  (or (:provider/operations provider) {}))
+
+(defn assert-role!
+  [provider]
+  (if (not= :work/receipt (:provider/role provider))
+    (throw
+     (ex-info "Work provider does not have the receipt role"
+              {:provider/role (:provider/role provider)
+               :provider/id (:provider/id provider)})))
+  provider)
+
+(defn normalise-provider
+  [provider]
+  (cond
+    (nil? provider)
+    (disabled-provider)
+
+    (and (map? provider)
+         (= :work/receipt (:provider/role provider)))
+    provider
+
+    (and (map? provider)
+         (:provider/role provider))
+    (assert-role! provider)
+
+    (map? provider)
+    {:provider/role :work/receipt
+     :provider/id (or (:provider/id provider) :legacy-receipt)
+     :provider/capabilities (or (:provider/capabilities provider) #{})
+     :provider/operations provider
+     :provider/legacy provider}
+
+    :else
+    (throw
+     (ex-info "Work receipt provider must be a descriptor or operation map"
+              {:provider provider}))))
+
+(defn record
+  [frame event data]
+  {:receipt/run (:run/id frame)
+   :receipt/work-root (:work/root frame)
+   :receipt/node-path (:node/path frame)
+   :receipt/item-id (:item/id frame)
+   :receipt/event event
+   :receipt/data (or data {})})
+
+(defn publish
+  "Invokes a receipt provider after an operational store has made publication
+   intent durable. The coordinator does not call this directly in the
+   structural split; the outbox transition in the next slice owns that order."
+  [provider receipt]
+  (let [function (get (provider-operations provider) :publish)]
+    (if function
+      (function receipt)
+      receipt)))

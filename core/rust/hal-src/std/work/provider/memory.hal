@@ -1,0 +1,147 @@
+(ns std.work.provider.memory
+  (:require [std.work.runtime.base :as base]
+            [std.work.runtime.store :as store]))
+
+(defn memory-next-id
+  [state]
+  (let [updated
+        (swap! state
+               (fn [data]
+                 (loop [counter (inc (or (:counter data) 0))]
+                   (let [id (str "run-" counter)]
+                     (if (nil? (get-in data [:runs id]))
+                       (assoc data :counter counter)
+                       (recur (inc counter)))))))]
+    (str "run-" (:counter updated))))
+
+(defn memory-create-run
+  [state run]
+  (let [id (:run/id run)]
+    (swap! state
+           (fn [data]
+             (let [existing (get-in data [:runs id])]
+               (cond
+                 (nil? existing)
+                 (assoc-in data [:runs id] run)
+
+                 (base/compatible-run? existing run)
+                 data
+
+                 :else
+                 (throw
+                  (ex-info "Work run identity conflicts with existing input"
+                           {:run/id id
+                            :existing/work (:run/work-root existing)
+                            :proposed/work (:run/work-root run)}))))))
+    (get-in (deref state) [:runs id])))
+
+(defn memory-load-run
+  [state id]
+  (get-in (deref state) [:runs id]))
+
+(defn memory-update-run
+  [state id updates]
+  (swap! state
+         (fn [data]
+           (let [run (get-in data [:runs id])]
+             (if run
+               (assoc-in data [:runs id] (merge run updates))
+               (throw
+                (ex-info "Work run does not exist" {:run/id id}))))))
+  (get-in (deref state) [:runs id]))
+
+(defn memory-list-runs
+  [state query]
+  (let [runs (vals (:runs (deref state)))
+        status (:status query)]
+    (vec
+     (if status
+       (filter (fn [run] (= status (:run/status run))) runs)
+       runs))))
+
+(defn memory-append-event
+  [state event]
+  (let [id (:run/id event)
+        updated
+        (swap! state
+               (fn [data]
+                 (let [sequence (inc (or (:sequence data) 0))
+                       event (assoc event :event/sequence sequence)
+                       events (vec (or (get-in data [:events id]) []))]
+                   (assoc-in
+                    (assoc data :sequence sequence)
+                    [:events id]
+                    (conj events event)))))]
+    (let [events (get-in updated [:events id])]
+      (nth events (dec (count events))))))
+
+(defn memory-list-events
+  [state id]
+  (vec (or (get-in (deref state) [:events id]) [])))
+
+(defn memory-load-checkpoint
+  [state key]
+  (get-in (deref state) [:checkpoints key]))
+
+(defn memory-commit-checkpoint
+  [state checkpoint]
+  (let [key (:checkpoint/key checkpoint)
+        updated
+        (swap! state
+               (fn [data]
+                 (let [existing (get-in data [:checkpoints key])]
+                   (if (= :completed (:checkpoint/status existing))
+                     data
+                     (let [sequence (inc (or (:sequence data) 0))
+                           checkpoint
+                           (assoc checkpoint
+                                  :checkpoint/sequence sequence)]
+                       (assoc-in
+                        (assoc data :sequence sequence)
+                        [:checkpoints key]
+                        checkpoint))))))]
+    (get-in updated [:checkpoints key])))
+
+(defn memory-list-checkpoints
+  [state id]
+  (vec
+   (reduce
+    (fn [output checkpoint]
+      (if (= id (:checkpoint/run checkpoint))
+        (conj output checkpoint)
+        output))
+    []
+    (vals (:checkpoints (deref state))))))
+
+(defn memory-backend
+  "Returns the legacy operation-map shape retained for compatibility."
+  []
+  (let [state (atom {:counter 0
+                     :sequence 0
+                     :runs {}
+                     :events {}
+                     :checkpoints {}})]
+    {:state state
+     :next-run-id (fn [] (memory-next-id state))
+     :create-run (fn [run] (memory-create-run state run))
+     :load-run (fn [id] (memory-load-run state id))
+     :update-run (fn [id updates] (memory-update-run state id updates))
+     :list-runs (fn [query] (memory-list-runs state query))
+     :append-event (fn [event] (memory-append-event state event))
+     :list-events (fn [id] (memory-list-events state id))
+     :load-checkpoint (fn [key] (memory-load-checkpoint state key))
+     :commit-checkpoint
+     (fn [checkpoint] (memory-commit-checkpoint state checkpoint))
+     :list-checkpoints (fn [id] (memory-list-checkpoints state id))}))
+
+(defn memory-store
+  "Returns the role-specific in-memory operational-store provider."
+  []
+  (let [backend (memory-backend)]
+    (store/normalise-provider
+     {:provider/role :work/store
+      :provider/id :memory
+      :provider/capabilities #{:runs :events :checkpoints}
+      :provider/operations backend
+      :provider/legacy backend
+      :provider/state (:state backend)})))

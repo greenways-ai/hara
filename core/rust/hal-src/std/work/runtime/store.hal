@@ -1,0 +1,149 @@
+(ns std.work.runtime.store)
+
+(def run-operations
+  [:next-run-id
+   :create-run
+   :load-run
+   :update-run
+   :list-runs])
+
+(def event-operations
+  [:append-event
+   :list-events])
+
+(def checkpoint-operations
+  [:load-checkpoint
+   :commit-checkpoint
+   :list-checkpoints])
+
+(defn capability?
+  [provider capability]
+  (reduce
+   (fn [found installed]
+     (or found (= capability installed)))
+   false
+   (or (:provider/capabilities provider) [])))
+
+(defn operations
+  [provider]
+  (or (:provider/operations provider) provider))
+
+(defn operations-installed?
+  [provider required]
+  (let [installed (operations provider)]
+    (reduce
+     (fn [valid operation]
+       (and valid (not (nil? (get installed operation)))))
+     true
+     required)))
+
+(defn missing-operations
+  [provider required]
+  (let [installed (operations provider)]
+    (reduce
+     (fn [missing operation]
+       (if (nil? (get installed operation))
+         (conj missing operation)
+         missing))
+     []
+     required)))
+
+(defn inferred-capabilities
+  [provider]
+  (let [base #{:runs :events}]
+    (if (operations-installed? provider checkpoint-operations)
+      (conj base :checkpoints)
+      base)))
+
+(defn legacy-provider
+  [backend]
+  {:provider/role :work/store
+   :provider/id (or (:provider/id backend) :legacy-backend)
+   :provider/capabilities (inferred-capabilities backend)
+   :provider/operations backend
+   :provider/legacy backend
+   :provider/state (:state backend)})
+
+(defn assert-role!
+  [provider]
+  (if (not= :work/store (:provider/role provider))
+    (throw
+     (ex-info "Work provider does not have the store role"
+              {:provider/role (:provider/role provider)
+               :provider/id (:provider/id provider)})))
+  provider)
+
+(defn assert-operations!
+  [provider required capability]
+  (let [missing (missing-operations provider required)]
+    (if (not (empty? missing))
+      (throw
+       (ex-info "Work store provider is missing required operations"
+                {:provider/id (:provider/id provider)
+                 :provider/capability capability
+                 :provider/missing missing}))))
+  provider)
+
+(defn require-capability!
+  [provider capability]
+  (if (not (capability? provider capability))
+    (throw
+     (ex-info "Work store provider does not support the required capability"
+              {:provider/id (:provider/id provider)
+               :provider/capability capability})))
+  provider)
+
+(defn validate-provider
+  [provider]
+  (let [provider (assert-role! provider)
+        provider
+        (if (:provider/capabilities provider)
+          provider
+          (assoc provider
+                 :provider/capabilities
+                 (inferred-capabilities provider)))]
+    (require-capability! provider :runs)
+    (require-capability! provider :events)
+    (assert-operations! provider run-operations :runs)
+    (assert-operations! provider event-operations :events)
+    (if (capability? provider :checkpoints)
+      (assert-operations! provider checkpoint-operations :checkpoints))
+    provider))
+
+(defn normalise-provider
+  [provider]
+  (cond
+    (nil? provider)
+    (throw (ex-info "Work runtime requires a store provider" {}))
+
+    (and (map? provider)
+         (= :work/store (:provider/role provider)))
+    (validate-provider provider)
+
+    (and (map? provider)
+         (:provider/role provider))
+    (assert-role! provider)
+
+    (map? provider)
+    (validate-provider (legacy-provider provider))
+
+    :else
+    (throw
+     (ex-info "Work store provider must be a descriptor or operation map"
+              {:provider provider}))))
+
+(defn assert-profile!
+  [provider mode]
+  (if (= :durable mode)
+    (require-capability! provider :checkpoints))
+  provider)
+
+(defn call
+  [provider operation & arguments]
+  (let [function (get (operations provider) operation)]
+    (if function
+      (apply function arguments)
+      (throw
+       (ex-info "Work store operation is not installed"
+                {:provider/id (:provider/id provider)
+                 :operation operation})))))

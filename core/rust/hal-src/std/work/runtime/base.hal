@@ -5,19 +5,36 @@
 (defstruct WorkRef [id])
 (defstruct WorkObserver [function state])
 (defstruct Runtime
-  [mode backend handlers observer definitions runtime-version schema-version])
+  [mode store executor receipt observer definitions runtime-version schema-version])
 
 (defn runtime-mode
   [runtime]
   (field runtime :mode))
 
+(defn runtime-store
+  [runtime]
+  (field runtime :store))
+
+(defn runtime-executor
+  [runtime]
+  (field runtime :executor))
+
+(defn runtime-receipt
+  [runtime]
+  (field runtime :receipt))
+
+;; Compatibility accessors for the pre-provider runtime layout. New runtime
+;; code should use runtime-store and runtime-executor directly.
 (defn runtime-backend
   [runtime]
-  (field runtime :backend))
+  (let [store (runtime-store runtime)]
+    (or (:provider/legacy store)
+        (:provider/operations store)
+        store)))
 
 (defn runtime-handlers
   [runtime]
-  (field runtime :handlers))
+  (or (:provider/handlers (runtime-executor runtime)) {}))
 
 (defn runtime-observer
   [runtime]
@@ -92,17 +109,27 @@
       [])))
 
 ;; ---------------------------------------------------------------------------
-;; Private backend seam
+;; Compatibility seams
 ;; ---------------------------------------------------------------------------
 
 (defn backend-call
+  "Deprecated compatibility dispatch for legacy backend maps."
   [backend operation & arguments]
-  (let [function (get backend operation)]
+  (let [operations (or (:provider/operations backend) backend)
+        function (get operations operation)]
     (if function
       (apply function arguments)
       (throw
        (ex-info "Work backend operation is not installed"
                 {:operation operation})))))
+
+(defn provider-capability?
+  [provider capability]
+  (reduce
+   (fn [found installed]
+     (or found (= capability installed)))
+   false
+   (or (:provider/capabilities provider) [])))
 
 (defn compatible-run?
   [existing proposed]
@@ -112,7 +139,8 @@
 
 (defn durable?
   [runtime]
-  (= :durable (runtime-mode runtime)))
+  (and (= :durable (runtime-mode runtime))
+       (provider-capability? (runtime-store runtime) :checkpoints)))
 
 (defn register-definition!
   [runtime root version work]
