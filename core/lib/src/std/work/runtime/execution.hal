@@ -135,6 +135,25 @@
               {:operation (:op spec)})))
   spec)
 
+(defn checkpoint-record
+  [frame spec input result attempts key]
+  {:checkpoint/run (:run/id frame)
+   :checkpoint/key key
+   :checkpoint/work-root (:work/root frame)
+   :checkpoint/work-version (:work/version frame)
+   :checkpoint/node-path (:node/path frame)
+   :checkpoint/item-id (:item/id frame)
+   :checkpoint/item-path (or (:item/path frame) [])
+   :checkpoint/status :completed
+   :checkpoint/input input
+   :checkpoint/result result
+   :checkpoint/attempts attempts
+   :checkpoint/definition-digest
+   (or (:definition-digest spec) (:digest spec))
+   :checkpoint/input-digest
+   (or (:input-digest spec)
+       (:input-digest (:options frame)))})
+
 (defn run-step
   [execute runtime frame spec input]
   (let [_ (assert-step-identity! runtime spec)
@@ -156,24 +175,25 @@
                      {:step/id (:id spec)
                       :checkpoint/key key})
             [result attempts]
-            (step-attempt runtime frame spec input 1 maximum)]
+            (step-attempt runtime frame spec input 1 maximum)
+            completed
+            (frame/event-record
+             frame
+             :work/step-completed
+             {:step/id (:id spec)
+              :checkpoint/key key
+              :attempts attempts})]
         (if (base/durable? runtime)
-          (store/call
-           (base/runtime-store runtime)
-           :commit-checkpoint
-           {:checkpoint/run (:run/id frame)
-            :checkpoint/key key
-            :checkpoint/work-root (:work/root frame)
-            :checkpoint/node-path (:node/path frame)
-            :checkpoint/item-id (:item/id frame)
-            :checkpoint/status :completed
-            :checkpoint/input input
-            :checkpoint/result result
-            :checkpoint/attempts attempts}))
-        (frame/emit! runtime frame :work/step-completed
-               {:step/id (:id spec)
-                :checkpoint/key key
-                :attempts attempts})
+          (frame/transact!
+           runtime
+           frame
+           {:transition/checkpoints
+            [(checkpoint-record frame spec input result attempts key)]
+            :transition/events [completed]})
+          (frame/emit! runtime frame :work/step-completed
+                 {:step/id (:id spec)
+                  :checkpoint/key key
+                  :attempts attempts}))
         result))))
 
 (defn run-chain

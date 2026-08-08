@@ -44,6 +44,20 @@
    :context (or (:context options) {})
    :options options})
 
+(defn terminal-status?
+  [status]
+  (or (= :completed status)
+      (= :failed status)
+      (= :cancelled status)))
+
+(defn commit-run-event!
+  [runtime frame updates event data]
+  (frame/transact!
+   runtime
+   frame
+   {:transition/run-updates (or updates {})
+    :transition/events [(frame/event-record frame event data)]}))
+
 (defn complete-run!
   [runtime frame id result]
   (let [current
@@ -54,28 +68,29 @@
                {:result result})
         (base/work-reference id))
       (do
-        (store/call (base/runtime-store runtime)
-                    :update-run
-                    id
-                    {:run/status :completed
-                     :run/result result
-                     :run/error nil})
-        (frame/emit! runtime frame :work/run-completed {:result result})
+        (commit-run-event!
+         runtime
+         frame
+         {:run/status :completed
+          :run/result result
+          :run/error nil}
+         :work/run-completed
+         {:result result})
         (base/work-reference id)))))
 
 (defn execute-run!
   [runtime run work options]
   (let [id (:run/id run)
         frame (initial-frame run options)]
-    (store/call (base/runtime-store runtime)
-                :update-run
-                id
-                {:run/status :running
-                 :run/error nil
-                 :run/options options})
-    (frame/emit! runtime frame :work/run-started
-           {:run/version (:run/work-version run)})
     (try
+      (commit-run-event!
+       runtime
+       frame
+       {:run/status :running
+        :run/error nil
+        :run/options options}
+       :work/run-started
+       {:run/version (:run/work-version run)})
       (let [result (execution/execute-work runtime
                                            frame
                                            work
@@ -87,15 +102,40 @@
           (if (= :cancelled (:run/status current))
             (frame/emit! runtime frame :work/run-cancelled
                    {:error (str error)})
-            (do
-              (store/call (base/runtime-store runtime)
-                          :update-run
-                          id
-                          {:run/status :failed
-                           :run/error (str error)})
-              (frame/emit! runtime frame :work/run-failed
-                     {:error (str error)}))))
+            (commit-run-event!
+             runtime
+             frame
+             {:run/status :failed
+              :run/error (str error)}
+             :work/run-failed
+             {:error (str error)})))
         (base/work-reference id)))))
+
+(defn requested-run-id
+  [runtime options]
+  (if (has? options :id)
+    (store/call (base/runtime-store runtime)
+                :validate-run-id
+                (:id options))
+    (store/call (base/runtime-store runtime) :next-run-id)))
+
+(defn initial-run-record
+  [runtime id root version input options]
+  {:run/id id
+   :run/work-root root
+   :run/work-version version
+   :run/runtime-version (base/runtime-code-version runtime)
+   :run/schema-version (base/runtime-schema-version runtime)
+   :run/revision 0
+   :run/status :created
+   :run/execution-status :created
+   :run/receipt-status :pending
+   :run/acceptance-status :pending
+   :run/input input
+   :run/result nil
+   :run/error nil
+   :run/options options
+   :run/attributes (or (:attributes options) {})})
 
 (defn start-run
   [runtime work input options]
@@ -103,20 +143,8 @@
         spec (base/work-spec-map work)
         root (runtime-root runtime spec options)
         version (definition-version spec options)
-        id (or (:id options)
-               (store/call (base/runtime-store runtime) :next-run-id))
-        proposed
-        {:run/id id
-         :run/work-root root
-         :run/work-version version
-         :run/runtime-version (base/runtime-code-version runtime)
-         :run/schema-version (base/runtime-schema-version runtime)
-         :run/status :created
-         :run/input input
-         :run/result nil
-         :run/error nil
-         :run/options options
-         :run/attributes (or (:attributes options) {})}
+        id (requested-run-id runtime options)
+        proposed (initial-run-record runtime id root version input options)
         existing (store/call (base/runtime-store runtime) :load-run id)]
     (register-work runtime work options)
     (if existing
@@ -164,7 +192,8 @@
         run (store/call (base/runtime-store runtime) :load-run id)]
     (if (nil? run)
       (throw (ex-info "Work run does not exist" {:run/id id}))
-      (if (= :completed (:run/status run))
+      (if (or (= :completed (:run/status run))
+              (= :cancelled (:run/status run)))
         (base/work-reference id)
         (let [work
               (base/resolve-definition runtime
@@ -183,12 +212,6 @@
                                  {:work-root (:run/work-root run)
                                   :work-version (:run/work-version run)}))))))))
 
-(defn terminal-status?
-  [status]
-  (or (= :completed status)
-      (= :failed status)
-      (= :cancelled status)))
-
 (defn cancel-run
   [runtime reference options]
   (let [id (base/reference-id reference)
@@ -197,17 +220,17 @@
       (throw (ex-info "Work run does not exist" {:run/id id}))
       (if (terminal-status? (:run/status current))
         (base/work-reference id)
-        (let [run (store/call (base/runtime-store runtime)
-                              :update-run
-                              id
-                              {:run/status :cancelled})
-              frame
+        (let [frame
               (initial-frame
-               run
-               (merge (or (:run/options run) {})
+               current
+               (merge (or (:run/options current) {})
                       (or options {})))]
-          (frame/emit! runtime frame :work/run-cancel-requested
-                 {:reason (:reason options)})
+          (commit-run-event!
+           runtime
+           frame
+           {:run/status :cancelled}
+           :work/run-cancel-requested
+           {:reason (:reason options)})
           (base/work-reference id))))))
 
 (defn path-last
@@ -255,22 +278,25 @@
        (ex-info "Fork checkpoint does not exist"
                 {:run/id source-id
                  :checkpoint selected})))
-    (reduce
-     (fn [copied checkpoint]
-       (if (< (:checkpoint/sequence checkpoint) before)
-         (let [old-key (vec (:checkpoint/key checkpoint))
-               new-key (assoc old-key 0 target-id)
-               clone
-               (assoc checkpoint
-                      :checkpoint/run target-id
-                      :checkpoint/key new-key)]
-           (store/call (base/runtime-store runtime)
-                       :commit-checkpoint
-                       clone)
-           (inc copied))
-         copied))
-     0
-     checkpoints)))
+    (let [clones
+          (reduce
+           (fn [output checkpoint]
+             (if (< (:checkpoint/sequence checkpoint) before)
+               (let [old-key (vec (:checkpoint/key checkpoint))
+                     new-key (assoc old-key 0 target-id)]
+                 (conj output
+                       (assoc checkpoint
+                              :checkpoint/run target-id
+                              :checkpoint/key new-key)))
+               output))
+           []
+           checkpoints)]
+      (if (not (empty? clones))
+        (store/transact-current!
+         (base/runtime-store runtime)
+         target-id
+         {:transition/checkpoints clones}))
+      (count clones))))
 
 (defn fork-run
   [runtime reference options]
@@ -280,8 +306,7 @@
         (store/call (base/runtime-store runtime) :load-run source-id)]
     (if (nil? source)
       (throw (ex-info "Work run does not exist" {:run/id source-id}))
-      (let [id (or (:id options)
-                   (store/call (base/runtime-store runtime) :next-run-id))
+      (let [id (requested-run-id runtime options)
             work
             (base/resolve-definition runtime
                                      (:run/work-root source)
@@ -292,21 +317,18 @@
                    {:work-root (:run/work-root source)
                     :work-version (:run/work-version source)})
             proposed
-            {:run/id id
-             :run/work-root (:run/work-root source)
-             :run/work-version (:run/work-version source)
-             :run/runtime-version (base/runtime-code-version runtime)
-             :run/schema-version (base/runtime-schema-version runtime)
-             :run/status :created
-             :run/input (:run/input source)
-             :run/result nil
-             :run/error nil
-             :run/options fork-options
-             :run/forked-from source-id
-             :run/fork-checkpoint (:checkpoint options)
-             :run/attributes
-             (merge (:run/attributes source)
-                    (or (:attributes options) {}))}
+            (merge
+             (initial-run-record runtime
+                                 id
+                                 (:run/work-root source)
+                                 (:run/work-version source)
+                                 (:run/input source)
+                                 fork-options)
+             {:run/forked-from source-id
+              :run/fork-checkpoint (:checkpoint options)
+              :run/attributes
+              (merge (:run/attributes source)
+                     (or (:attributes options) {}))})
             existing
             (store/call (base/runtime-store runtime) :load-run id)]
         (if (nil? work)

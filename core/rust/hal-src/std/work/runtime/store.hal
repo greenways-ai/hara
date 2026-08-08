@@ -2,19 +2,32 @@
 
 (def run-operations
   [:next-run-id
+   :validate-run-id
    :create-run
    :load-run
-   :update-run
    :list-runs])
 
+(def transaction-operations
+  [:transact])
+
 (def event-operations
-  [:append-event
-   :list-events])
+  [:list-events])
 
 (def checkpoint-operations
   [:load-checkpoint
-   :commit-checkpoint
    :list-checkpoints])
+
+(def outbox-operations
+  [:list-outbox
+   :claim-outbox
+   :ack-outbox])
+
+(def mandatory-capabilities
+  [:runs
+   :transactions
+   :events
+   :checkpoints
+   :outbox])
 
 (defn capability?
   [provider capability]
@@ -50,10 +63,26 @@
 
 (defn inferred-capabilities
   [provider]
-  (let [base #{:runs :events}]
-    (if (operations-installed? provider checkpoint-operations)
-      (conj base :checkpoints)
-      base)))
+  (let [capabilities #{}
+        capabilities
+        (if (operations-installed? provider run-operations)
+          (conj capabilities :runs)
+          capabilities)
+        capabilities
+        (if (operations-installed? provider transaction-operations)
+          (conj capabilities :transactions)
+          capabilities)
+        capabilities
+        (if (operations-installed? provider event-operations)
+          (conj capabilities :events)
+          capabilities)
+        capabilities
+        (if (operations-installed? provider checkpoint-operations)
+          (conj capabilities :checkpoints)
+          capabilities)]
+    (if (operations-installed? provider outbox-operations)
+      (conj capabilities :outbox)
+      capabilities)))
 
 (defn legacy-provider
   [backend]
@@ -102,12 +131,16 @@
           (assoc provider
                  :provider/capabilities
                  (inferred-capabilities provider)))]
-    (require-capability! provider :runs)
-    (require-capability! provider :events)
+    (reduce
+     (fn [validated capability]
+       (require-capability! validated capability))
+     provider
+     mandatory-capabilities)
     (assert-operations! provider run-operations :runs)
+    (assert-operations! provider transaction-operations :transactions)
     (assert-operations! provider event-operations :events)
-    (if (capability? provider :checkpoints)
-      (assert-operations! provider checkpoint-operations :checkpoints))
+    (assert-operations! provider checkpoint-operations :checkpoints)
+    (assert-operations! provider outbox-operations :outbox)
     provider))
 
 (defn normalise-provider
@@ -134,9 +167,10 @@
 
 (defn assert-profile!
   [provider mode]
-  (if (= :durable mode)
-    (require-capability! provider :checkpoints))
-  provider)
+  ;; All execution profiles now use the same operational-store contract.
+  ;; Persistence, claims, and leases remain capability extensions rather than
+  ;; alternate write paths.
+  (validate-provider provider))
 
 (defn call
   [provider operation & arguments]
@@ -147,3 +181,32 @@
        (ex-info "Work store operation is not installed"
                 {:provider/id (:provider/id provider)
                  :operation operation})))))
+
+(defn load-run!
+  [provider run-id]
+  (let [run (call provider :load-run run-id)]
+    (if (nil? run)
+      (throw (ex-info "Work run does not exist" {:run/id run-id})))
+    run))
+
+(defn transition-request
+  [run-id expected-revision changes]
+  (merge
+   {:transition/run-id run-id
+    :transition/expected-revision expected-revision
+    :transition/run-updates {}
+    :transition/checkpoints []
+    :transition/events []
+    :transition/outbox []}
+   (or changes {})
+   {:transition/run-id run-id
+    :transition/expected-revision expected-revision}))
+
+(defn transact-current!
+  [provider run-id changes]
+  (let [run (load-run! provider run-id)]
+    (call provider
+          :transact
+          (transition-request run-id
+                              (or (:run/revision run) 0)
+                              changes))))

@@ -44,24 +44,52 @@
    (:node/path frame)
    (:item/id frame)])
 
-(defn emit!
-  [runtime frame event data]
-  (let [record
-        (merge {:event event
-                :run/id (:run/id frame)
-                :work/root (:work/root frame)
-                :node/path (:node/path frame)
-                :item/id (:item/id frame)}
-               (or data {}))
-        stored (store/call (base/runtime-store runtime)
-                           :append-event
-                           record)
-        observer (base/runtime-observer runtime)]
+(defn event-record
+  [frame event data]
+  (merge {:event event
+          :run/id (:run/id frame)
+          :work/root (:work/root frame)
+          :node/path (:node/path frame)
+          :item/id (:item/id frame)}
+         (or data {})))
+
+(defn notify-event!
+  [runtime event]
+  (let [observer (base/runtime-observer runtime)]
     (if observer
       (try
-        (protocol/work-event observer stored)
-        (catch Throwable error nil)))
-    stored))
+        (protocol/work-event observer event)
+        (catch Throwable error nil))))
+  event)
+
+(defn notify-events!
+  [runtime events]
+  (reduce
+   (fn [notified event]
+     (notify-event! runtime event)
+     (inc notified))
+   0
+   (or events [])))
+
+(defn transact!
+  [runtime frame changes]
+  (let [result
+        (store/transact-current!
+         (base/runtime-store runtime)
+         (:run/id frame)
+         changes)]
+    ;; Observers see only records that the store returned as committed.
+    (notify-events! runtime (:transition/events result))
+    result))
+
+(defn emit!
+  [runtime frame event data]
+  (let [result
+        (transact! runtime
+                   frame
+                   {:transition/events
+                    [(event-record frame event data)]})]
+    (first (:transition/events result))))
 
 (defn leaf-context
   ([frame]

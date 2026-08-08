@@ -1,0 +1,225 @@
+(ns std.work.provider.conformance
+  (:require [std.work.runtime.store :as store]))
+
+(defn throws?
+  [function]
+  (try
+    (function)
+    false
+    (catch Throwable error
+      true)))
+
+(defn sample-run
+  [id input]
+  {:run/id id
+   :run/work-root :conformance/work
+   :run/work-version 1
+   :run/runtime-version 1
+   :run/schema-version 1
+   :run/revision 0
+   :run/status :created
+   :run/execution-status :created
+   :run/receipt-status :pending
+   :run/acceptance-status :pending
+   :run/input input
+   :run/result nil
+   :run/error nil
+   :run/options {}
+   :run/attributes {}})
+
+(defn last-value
+  [values]
+  (let [values (vec values)]
+    (if (empty? values)
+      nil
+      (nth values (dec (count values))))))
+
+(defn strictly-increasing?
+  [values]
+  (let [values (vec values)]
+    (loop [index 1]
+      (if (= index (count values))
+        true
+        (if (< (nth values (dec index))
+               (nth values index))
+          (recur (inc index))
+          false)))))
+
+(defn transact-at
+  [provider run-id revision changes]
+  (store/call provider
+              :transact
+              (store/transition-request run-id revision changes)))
+
+(defn current-revision
+  [provider run-id]
+  (:run/revision (store/call provider :load-run run-id)))
+
+(defn run-store-corpus
+  "Runs the reusable operational-store conformance corpus against a provider
+   factory and returns one boolean per required scenario."
+  [factory]
+  (let [provider (factory)
+        run-id "store-conformance"
+        proposed (sample-run run-id {:value 1})
+        created (store/call provider :create-run proposed)
+        repeated (store/call provider :create-run proposed)
+        idempotent-create (= created repeated)
+        conflicting-create
+        (throws?
+         (fn []
+           (store/call provider
+                       :create-run
+                       (sample-run run-id {:value 2}))))
+        first-transition
+        (transact-at
+         provider
+         run-id
+         0
+         {:transition/run-updates {:run/status :running}
+          :transition/events [{:event :work/run-started}]})
+        second-transition
+        (transact-at
+         provider
+         run-id
+         1
+         {:transition/events [{:event :work/progress}]})
+        monotonic-revisions
+        (= [1 2]
+           [(:transition/revision first-transition)
+            (:transition/revision second-transition)])
+        before-failed-cas
+        {:run (store/call provider :load-run run-id)
+         :events (store/call provider :list-events run-id)
+         :checkpoints (store/call provider :list-checkpoints run-id)}
+        failed-cas
+        (throws?
+         (fn []
+           (transact-at
+            provider
+            run-id
+            0
+            {:transition/events [{:event :work/uncommitted}]})))
+        after-failed-cas
+        {:run (store/call provider :load-run run-id)
+         :events (store/call provider :list-events run-id)
+         :checkpoints (store/call provider :list-checkpoints run-id)}
+        cas-no-partial-writes
+        (and failed-cas (= before-failed-cas after-failed-cas))
+        checkpoint-key [run-id :conformance/work [:step :one] nil]
+        checkpoint
+        {:checkpoint/run run-id
+         :checkpoint/key checkpoint-key
+         :checkpoint/work-root :conformance/work
+         :checkpoint/work-version 1
+         :checkpoint/node-path [:step :one]
+         :checkpoint/item-id nil
+         :checkpoint/item-path []
+         :checkpoint/status :completed
+         :checkpoint/input {:value 1}
+         :checkpoint/result {:value 2}
+         :checkpoint/attempts 1}
+        checkpoint-transition
+        (transact-at
+         provider
+         run-id
+         2
+         {:transition/checkpoints [checkpoint]
+          :transition/events
+          [{:event :work/step-completed
+            :checkpoint/key checkpoint-key}]})
+        stored-checkpoint
+        (store/call provider :load-checkpoint checkpoint-key)
+        completion-event
+        (last-value (store/call provider :list-events run-id))
+        checkpoint-event-atomic
+        (and (= :completed (:checkpoint/status stored-checkpoint))
+             (= :work/step-completed (:event completion-event))
+             (= 3 (:transition/revision checkpoint-transition)))
+        before-immutable
+        {:revision (current-revision provider run-id)
+         :events (store/call provider :list-events run-id)
+         :checkpoint stored-checkpoint}
+        immutable-rejected
+        (throws?
+         (fn []
+           (transact-at
+            provider
+            run-id
+            (:revision before-immutable)
+            {:transition/checkpoints
+             [(assoc checkpoint :checkpoint/result {:value 99})]
+             :transition/events [{:event :work/should-not-commit}]})))
+        after-immutable
+        {:revision (current-revision provider run-id)
+         :events (store/call provider :list-events run-id)
+         :checkpoint (store/call provider :load-checkpoint checkpoint-key)}
+        completed-checkpoint-immutable
+        (and immutable-rejected (= before-immutable after-immutable))
+        event-sequences
+        (vec
+         (map (fn [event] (:event/sequence event))
+              (store/call provider :list-events run-id)))
+        stable-event-ordering (strictly-increasing? event-sequences)
+        cancellation
+        (transact-at
+         provider
+         run-id
+         (current-revision provider run-id)
+         {:transition/run-updates {:run/status :cancelled}
+          :transition/events [{:event :work/run-cancel-requested}]})
+        cancellation-visible
+        (and (= :cancelled
+                (:run/status (store/call provider :load-run run-id)))
+             (= :work/run-cancel-requested
+                (:event
+                 (last-value (store/call provider :list-events run-id))))
+             (= (:transition/revision cancellation)
+                (current-revision provider run-id)))
+        outbox-intent
+        {:outbox/key [run-id :receipt :final]
+         :outbox/topic :work/receipt
+         :outbox/payload {:run/id run-id}}
+        first-outbox
+        (transact-at
+         provider
+         run-id
+         (current-revision provider run-id)
+         {:transition/outbox [outbox-intent]})
+        second-outbox
+        (transact-at
+         provider
+         run-id
+         (current-revision provider run-id)
+         {:transition/outbox [outbox-intent]})
+        first-entry (first (:transition/outbox first-outbox))
+        second-entry (first (:transition/outbox second-outbox))
+        pending-outbox (store/call provider :list-outbox {:status :pending})
+        claimed (store/call provider
+                            :claim-outbox
+                            {:claim/id "conformance-claim"
+                             :limit 1})
+        claimed-entry (first claimed)
+        acked
+        (store/call provider
+                    :ack-outbox
+                    (:outbox/id claimed-entry)
+                    {:claim/id "conformance-claim"
+                     :ack/data {:published true}})
+        outbox-idempotent-and-acked
+        (and (= (:outbox/id first-entry) (:outbox/id second-entry))
+             (= 1 (count pending-outbox))
+             (= :claimed (:outbox/status claimed-entry))
+             (= :acked (:outbox/status acked))
+             (= 1 (count (store/call provider
+                                     :list-outbox
+                                     {:status :acked}))))]
+    {:idempotent-create idempotent-create
+     :conflicting-create-rejected conflicting-create
+     :monotonic-revisions monotonic-revisions
+     :failed-cas-no-partial-writes cas-no-partial-writes
+     :checkpoint-event-atomic checkpoint-event-atomic
+     :stable-event-ordering stable-event-ordering
+     :completed-checkpoint-immutable completed-checkpoint-immutable
+     :cancellation-visible cancellation-visible
+     :outbox-idempotent-and-acked outbox-idempotent-and-acked}))

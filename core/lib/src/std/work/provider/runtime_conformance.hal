@@ -1,0 +1,74 @@
+(ns std.work.provider.runtime-conformance
+  (:require [std.work :as work]))
+
+(defn event-count
+  [events event]
+  (reduce
+   (fn [total record]
+     (if (= event (:event record))
+       (inc total)
+       total))
+   0
+   events))
+
+(defn run-runtime-corpus
+  "Runs recovery and fork scenarios against one shared store provider so the
+   same runtime-level durability checks can be reused by every implementation."
+  [factory]
+  (let [provider (factory)
+        prepare-count (atom 0)
+        finish-count (atom 0)
+        workflow
+        (work/chain
+         {:id :conformance/recovery-work
+          :version 1}
+         [(work/step :prepare
+            (fn [value context]
+              (swap! prepare-count inc)
+              (inc value)))
+          (work/step :finish
+            (fn [value context]
+              (let [attempt (swap! finish-count inc)]
+                (if (= attempt 1)
+                  (throw
+                   (ex-info "interrupted before checkpoint"
+                            {:attempt attempt}))
+                  (+ value 10)))))])
+        runtime-before (work/durable-runtime {:store provider})
+        reference
+        (work/start runtime-before
+                    workflow
+                    2
+                    {:id "runtime-conformance"})
+        status-before (work/status runtime-before reference)
+        runtime-after (work/durable-runtime {:store provider})
+        registration (work/register runtime-after workflow)
+        resumed-reference (work/resume runtime-after reference)
+        resumed-status (work/status runtime-after resumed-reference)
+        resumed-result (work/result runtime-after resumed-reference)
+        resumed-counts [(deref prepare-count) (deref finish-count)]
+        resumed-checkpoints (work/checkpoints runtime-after resumed-reference)
+        resumed-history (work/history runtime-after resumed-reference)
+        fork-reference
+        (work/fork runtime-after
+                   resumed-reference
+                   :finish
+                   {:id "runtime-conformance-fork"})
+        fork-status (work/status runtime-after fork-reference)
+        fork-result (work/result runtime-after fork-reference)
+        final-counts [(deref prepare-count) (deref finish-count)]
+        fork-checkpoints (work/checkpoints runtime-after fork-reference)
+        fork-history (work/history runtime-after fork-reference)]
+    {:resume-after-replacement
+     (and (= :failed status-before)
+          (= :completed resumed-status)
+          (= 13 resumed-result)
+          (= [1 2] resumed-counts)
+          (= 2 (count resumed-checkpoints))
+          (= 1 (event-count resumed-history :work/step-replayed)))
+     :fork-checkpoint-copy
+     (and (= :completed fork-status)
+          (= 13 fork-result)
+          (= [1 3] final-counts)
+          (= 2 (count fork-checkpoints))
+          (= 1 (event-count fork-history :work/step-replayed)))}))

@@ -1,0 +1,98 @@
+(ns std.work-store-test
+  (:require [std.lib.test :as test]
+            [std.work :as work]
+            [std.work.provider.conformance :as conformance]
+            [std.work.provider.memory :as memory]
+            [std.work.provider.runtime-conformance :as runtime-conformance]))
+
+(def store-corpus
+  (conformance/run-store-corpus memory/memory-store))
+
+(def runtime-corpus
+  (runtime-conformance/run-runtime-corpus memory/memory-store))
+
+(defn event-count
+  [events event]
+  (reduce
+   (fn [total record]
+     (if (= event (:event record))
+       (inc total)
+       total))
+   0
+   events))
+
+(def failing-backend (work/memory-backend))
+
+(defn contains-uncommitted-event?
+  [transition]
+  (reduce
+   (fn [found event]
+     (or found (= :work/uncommitted (:event event))))
+   false
+   (or (:transition/events transition) [])))
+
+(def failing-store
+  {:provider/role :work/store
+   :provider/id :failing-memory
+   :provider/capabilities
+   #{:runs :transactions :events :checkpoints :outbox}
+   :provider/operations
+   (assoc failing-backend
+          :transact
+          (fn [transition]
+            (if (contains-uncommitted-event? transition)
+              (throw
+               (ex-info "simulated transaction failure"
+                        {:transition transition}))
+              ((:transact failing-backend) transition))))})
+
+(def failure-observer (work/recording-observer))
+(def failure-runtime
+  (work/local-runtime
+   {:store failing-store
+    :observer failure-observer}))
+
+(def failure-work
+  (work/pure
+   :failure-observer-work
+   (fn [input context]
+     (work/emit! context :work/uncommitted {:value input})
+     input)))
+
+(def failure-reference
+  (work/start failure-runtime
+              failure-work
+              7
+              {:id "observer-failure"}))
+
+(def failure-events (work/observer-events failure-observer))
+
+(def results
+  [(test/check
+    "memory store passes the reusable atomic transition corpus"
+    store-corpus
+    {:idempotent-create true
+     :conflicting-create-rejected true
+     :monotonic-revisions true
+     :failed-cas-no-partial-writes true
+     :checkpoint-event-atomic true
+     :stable-event-ordering true
+     :completed-checkpoint-immutable true
+     :cancellation-visible true
+     :outbox-idempotent-and-acked true})
+
+   (test/check
+    "memory store passes reusable recovery and fork scenarios"
+    runtime-corpus
+    {:resume-after-replacement true
+     :fork-checkpoint-copy true})
+
+   (test/check
+    "observers never receive events rejected by the store"
+    [(work/status failure-runtime failure-reference)
+     (event-count failure-events :work/uncommitted)
+     (event-count (work/history failure-runtime failure-reference)
+                  :work/uncommitted)]
+    [:failed 0 0])])
+
+(test/print-results results)
