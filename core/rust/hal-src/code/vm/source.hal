@@ -1,5 +1,6 @@
 (ns code.vm.source
-  (:require [std.block :as block]))
+  (:require [std.foundation :refer :all :exclude [resolve]]
+            [std.block :as block]))
 
 (defn- invalid
   [message data]
