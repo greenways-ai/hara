@@ -1,0 +1,30 @@
+(ns code.test-support-test
+  (:require [code.test.base.match :as match]
+            [code.test.cli :as cli]
+            [code.test.selector :as selector]
+            [std.lib.test :as test]))
+
+(def results
+  [(test/check
+    "test selectors preserve archived prefix and collection semantics"
+    [(selector/matches? 'code 'code.test)
+     (selector/matches? ['std 'code.test] 'code.test)
+     (selector/matches? '(code test) 'code.test)
+     (selector/matches? #{'code.test 'std.work} 'code.test)
+     (selector/matches? nil 'anything)
+     (match/match-options 'code.test {:include 'code
+                                      :exclude 'std})]
+    [true true true true true true])
+
+   (test/check
+    "test CLI parsing is owned by code.test and emits runner selectors"
+    [(cli/process-args
+      (cli/collapse-only
+       [":only" "std" "code" ":fail-fast" "true"]))
+     (cli/process-args [":with" "code.test" ":timeout" "25"])]
+    [{:namespace ['std 'code]
+      :fail-fast true}
+     {:namespace ['code.test]
+      :timeout 25}])])
+
+(test/print-results results)
