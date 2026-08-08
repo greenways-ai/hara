@@ -1,0 +1,32 @@
+name: Diagnose PR 430 runtime
+
+on:
+  push:
+    branches:
+      - agent/fix-code-vm-observation-layout
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-rust:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - callable_var_scenarios_execute_from_shared_spec
+          - foundation_code_test_compatibility_namespaces_are_embedded
+          - module_ns_require_reload_executes_shared_spec_fixture
+          - namespace_use_refers_portable_test_vars_and_macros
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run isolated failing test
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          cargo test --manifest-path core/rust/Cargo.toml \
+            "tests::${{ matrix.test }}" \
+            -- --exact --nocapture --test-threads=1
