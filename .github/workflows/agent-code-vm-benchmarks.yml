@@ -28,182 +28,183 @@ jobs:
           path = Path('core/rust/src/bin/hara-bytecode-benchmark.rs')
           text = path.read_text()
 
-          old = '''//! - `execute-only`    — compile once; execute + display per call.
-          //! - `runtime-compile-execute` — compile and execute through a `Runtime`,'''.replace('          ', '')
-          new = '''//! - `execute-only`    — compile once; execute + display per call.
-          //! - `execute-feature-enabled` — the same ordinary execution API, intended
-          //!                       to run in a build that also compiles instrumentation.
-          //! - `execute-instrumented-noop` — compile once; execute through `NoProbe`.
-          //! - `execute-counted`   — compile once; collect aggregate counters.
-          //! - `execute-sampled`   — compile once; sample instructions while retaining
-          //!                       all control-flow and terminal boundaries.
-          //! - `execute-events`    — compile once; retain a fixed-capacity event ring.
-          //! - `execute-observed`  — compile once; execute through full snapshots.
-          //! - `runtime-compile-execute` — compile and execute through a `Runtime`,'''.replace('          ', '')
-          if old not in text:
-              raise SystemExit('benchmark mode documentation marker not found')
-          text = text.replace(old, new, 1)
-
-          old = '''        "execute-only" => "hara-rust-bytecode-execute-only",
-                  "runtime-compile-execute" => "hara-rust-bytecode-runtime-compile-execute",'''.replace('          ', '')
-          new = '''        "execute-only" => "hara-rust-bytecode-execute-only",
-                  "execute-feature-enabled" => "hara-rust-bytecode-feature-enabled",
-                  "execute-instrumented-noop" => "hara-rust-bytecode-instrumented-noop",
-                  "execute-counted" => "hara-rust-bytecode-counted",
-                  "execute-sampled" => "hara-rust-bytecode-sampled",
-                  "execute-events" => "hara-rust-bytecode-events",
-                  "execute-observed" => "hara-rust-bytecode-observed",
-                  "runtime-compile-execute" => "hara-rust-bytecode-runtime-compile-execute",'''.replace('          ', '')
-          if old not in text:
-              raise SystemExit('benchmark runtime-name marker not found')
-          text = text.replace(old, new, 1)
-
-          old = '''        "execute-only" => {
-                    Some(hara_wasm::compile_bytecode(&source).unwrap_or_else(|error| fail(id, &error)))
-                }
-                "runtime-execute" | "runtime-registry-execute" => Some('''.replace('              ', '')
-          new = '''        "execute-only"
-                | "execute-feature-enabled"
-                | "execute-instrumented-noop"
-                | "execute-counted"
-                | "execute-sampled"
-                | "execute-events"
-                | "execute-observed" => {
-                    Some(hara_wasm::compile_bytecode(&source).unwrap_or_else(|error| fail(id, &error)))
-                }
-                "runtime-execute" | "runtime-registry-execute" => Some('''.replace('              ', '')
-          if old not in text:
-              raise SystemExit('benchmark precompile marker not found')
-          text = text.replace(old, new, 1)
-
-          old = '''        "execute-only"
-                  | "runtime-execute"'''.replace('          ', '')
-          new = '''        "execute-only"
-                  | "execute-feature-enabled"
-                  | "execute-instrumented-noop"
-                  | "execute-counted"
-                  | "execute-sampled"
-                  | "execute-events"
-                  | "execute-observed"
-                  | "runtime-execute"'''.replace('          ', '')
-          if old not in text:
-              raise SystemExit('benchmark preparation marker not found')
-          text = text.replace(old, new, 1)
-
-          old = '''            "execute-only" => hara_wasm::execute_bytecode(program.as_ref().expect("program")),
-                      "runtime-compile-execute" => runtime.eval_bytecode_native(&source),'''.replace('          ', '')
-          new = '''            "execute-only" | "execute-feature-enabled" => {
-                          hara_wasm::execute_bytecode(program.as_ref().expect("program"))
-                      }
-                      "execute-instrumented-noop"
-                      | "execute-counted"
-                      | "execute-sampled"
-                      | "execute-events" => execute_instrumented(
-                          program.as_ref().expect("program"),
-                          mode,
-                      ),
-                      "execute-observed" => execute_observed(program.as_ref().expect("program")),
-                      "runtime-compile-execute" => runtime.eval_bytecode_native(&source),'''.replace('          ', '')
-          if old not in text:
-              raise SystemExit('benchmark dispatch marker not found')
-          text = text.replace(old, new, 1)
+          replacements = [
+            (
+              '''//! - `execute-only`    — compile once; execute + display per call.
+//! - `runtime-compile-execute` — compile and execute through a `Runtime`,''',
+              '''//! - `execute-only`    — compile once; execute + display per call.
+//! - `execute-feature-enabled` — the same ordinary execution API, intended
+//!                       to run in a build that also compiles instrumentation.
+//! - `execute-instrumented-noop` — compile once; execute through `NoProbe`.
+//! - `execute-counted`   — compile once; collect aggregate counters.
+//! - `execute-sampled`   — compile once; sample instructions while retaining
+//!                       all control-flow and terminal boundaries.
+//! - `execute-events`    — compile once; retain a fixed-capacity event ring.
+//! - `execute-observed`  — compile once; execute through full snapshots.
+//! - `runtime-compile-execute` — compile and execute through a `Runtime`,''',
+              'mode documentation',
+            ),
+            (
+              '''        "execute-only" => "hara-rust-bytecode-execute-only",
+        "runtime-compile-execute" => "hara-rust-bytecode-runtime-compile-execute",''',
+              '''        "execute-only" => "hara-rust-bytecode-execute-only",
+        "execute-feature-enabled" => "hara-rust-bytecode-feature-enabled",
+        "execute-instrumented-noop" => "hara-rust-bytecode-instrumented-noop",
+        "execute-counted" => "hara-rust-bytecode-counted",
+        "execute-sampled" => "hara-rust-bytecode-sampled",
+        "execute-events" => "hara-rust-bytecode-events",
+        "execute-observed" => "hara-rust-bytecode-observed",
+        "runtime-compile-execute" => "hara-rust-bytecode-runtime-compile-execute",''',
+              'runtime names',
+            ),
+            (
+              '''        "execute-only" => {
+            Some(hara_wasm::compile_bytecode(&source).unwrap_or_else(|error| fail(id, &error)))
+        }
+        "runtime-execute" | "runtime-registry-execute" => Some(''',
+              '''        "execute-only"
+        | "execute-feature-enabled"
+        | "execute-instrumented-noop"
+        | "execute-counted"
+        | "execute-sampled"
+        | "execute-events"
+        | "execute-observed" => {
+            Some(hara_wasm::compile_bytecode(&source).unwrap_or_else(|error| fail(id, &error)))
+        }
+        "runtime-execute" | "runtime-registry-execute" => Some(''',
+              'precompile modes',
+            ),
+            (
+              '''        "execute-only"
+        | "runtime-execute"''',
+              '''        "execute-only"
+        | "execute-feature-enabled"
+        | "execute-instrumented-noop"
+        | "execute-counted"
+        | "execute-sampled"
+        | "execute-events"
+        | "execute-observed"
+        | "runtime-execute"''',
+              'prepare timing',
+            ),
+            (
+              '''            "execute-only" => hara_wasm::execute_bytecode(program.as_ref().expect("program")),
+            "runtime-compile-execute" => runtime.eval_bytecode_native(&source),''',
+              '''            "execute-only" | "execute-feature-enabled" => {
+                hara_wasm::execute_bytecode(program.as_ref().expect("program"))
+            }
+            "execute-instrumented-noop"
+            | "execute-counted"
+            | "execute-sampled"
+            | "execute-events" => {
+                execute_instrumented(program.as_ref().expect("program"), mode)
+            }
+            "execute-observed" => execute_observed(program.as_ref().expect("program")),
+            "runtime-compile-execute" => runtime.eval_bytecode_native(&source),''',
+              'dispatch modes',
+            ),
+          ]
+          for old, new, label in replacements:
+              if old not in text:
+                  raise SystemExit(f'benchmark {label} marker not found')
+              text = text.replace(old, new, 1)
 
           marker = '''}
 
-          #[cfg(feature = "halc-encoder")]
-          fn compile_halc('''.replace('          ', '')
+#[cfg(feature = "halc-encoder")]
+fn compile_halc('''
           helpers = '''}
 
-          #[cfg(feature = "bytecode-instrumentation")]
-          fn execute_instrumented(
-              program: &std::rc::Rc<hara_wasm::vm::Program>,
-              mode: &str,
-          ) -> Result<String, String> {
-              use hara_wasm::vm::{
-                  CounterProbe, EventRing, Machine, NoProbe, SampledProbe, VmOutcome,
-              };
-              use std::hint::black_box;
+#[cfg(feature = "bytecode-instrumentation")]
+fn execute_instrumented(
+    program: &std::rc::Rc<hara_wasm::vm::Program>,
+    mode: &str,
+) -> Result<String, String> {
+    use hara_wasm::vm::{CounterProbe, EventRing, Machine, NoProbe, SampledProbe};
+    use std::hint::black_box;
 
-              let mut machine = Machine::entry(program.clone());
-              let outcome = match mode {
-                  "execute-instrumented-noop" => machine.run_instrumented(&mut NoProbe),
-                  "execute-counted" => {
-                      let mut probe = CounterProbe::default();
-                      let outcome = machine.run_instrumented(&mut probe);
-                      black_box((
-                          probe.metrics().instructions,
-                          probe.metrics().max_stack_depth,
-                          probe.metrics().max_call_depth,
-                      ));
-                      outcome
-                  }
-                  "execute-sampled" => {
-                      let mut probe = SampledProbe::new(EventRing::with_capacity(256), 64);
-                      let outcome = machine.run_instrumented(&mut probe);
-                      black_box((probe.inner().len(), probe.inner().dropped()));
-                      outcome
-                  }
-                  "execute-events" => {
-                      let mut probe = EventRing::with_capacity(256);
-                      let outcome = machine.run_instrumented(&mut probe);
-                      black_box((probe.len(), probe.dropped()));
-                      outcome
-                  }
-                  _ => return Err(format!("unknown instrumented mode: {mode}")),
-              };
-              display_outcome(outcome)
-          }
+    let mut machine = Machine::entry(program.clone());
+    let outcome = match mode {
+        "execute-instrumented-noop" => {
+            let mut probe = NoProbe;
+            machine.run_instrumented(&mut probe)
+        }
+        "execute-counted" => {
+            let mut probe = CounterProbe::default();
+            let outcome = machine.run_instrumented(&mut probe);
+            black_box((
+                probe.metrics().instructions,
+                probe.metrics().max_stack_depth,
+                probe.metrics().max_call_depth,
+            ));
+            outcome
+        }
+        "execute-sampled" => {
+            let mut probe = SampledProbe::new(EventRing::with_capacity(256), 64);
+            let outcome = machine.run_instrumented(&mut probe);
+            black_box((probe.inner().len(), probe.inner().dropped()));
+            outcome
+        }
+        "execute-events" => {
+            let mut probe = EventRing::with_capacity(256);
+            let outcome = machine.run_instrumented(&mut probe);
+            black_box((probe.len(), probe.dropped()));
+            outcome
+        }
+        _ => return Err(format!("unknown instrumented mode: {mode}")),
+    };
+    display_outcome(outcome)
+}
 
-          #[cfg(not(feature = "bytecode-instrumentation"))]
-          fn execute_instrumented(
-              _program: &std::rc::Rc<hara_wasm::vm::Program>,
-              mode: &str,
-          ) -> Result<String, String> {
-              Err(format!("{mode} requires the bytecode-instrumentation feature"))
-          }
+#[cfg(not(feature = "bytecode-instrumentation"))]
+fn execute_instrumented(
+    _program: &std::rc::Rc<hara_wasm::vm::Program>,
+    mode: &str,
+) -> Result<String, String> {
+    Err(format!("{mode} requires the bytecode-instrumentation feature"))
+}
 
-          #[cfg(feature = "bytecode-observation")]
-          fn execute_observed(
-              program: &std::rc::Rc<hara_wasm::vm::Program>,
-          ) -> Result<String, String> {
-              use hara_wasm::vm::{Machine, ObservedStepOutcome};
-              let mut machine = Machine::entry(program.clone());
-              loop {
-                  match machine.step_observed().outcome {
-                      ObservedStepOutcome::Continue => {}
-                      ObservedStepOutcome::Returned(value) => return Ok(value.display()),
-                      ObservedStepOutcome::Failed(error) => return Err(error.to_string()),
-                      ObservedStepOutcome::Suspended(_) => {
-                          return Err("observed benchmark suspended".into())
-                      }
-                  }
-              }
-          }
+#[cfg(feature = "bytecode-observation")]
+fn execute_observed(
+    program: &std::rc::Rc<hara_wasm::vm::Program>,
+) -> Result<String, String> {
+    use hara_wasm::vm::{Machine, ObservedStepOutcome};
+    let mut machine = Machine::entry(program.clone());
+    loop {
+        match machine.step_observed().outcome {
+            ObservedStepOutcome::Continue => {}
+            ObservedStepOutcome::Returned(value) => return Ok(value.display()),
+            ObservedStepOutcome::Failed(error) => return Err(error.to_string()),
+            ObservedStepOutcome::Suspended(_) => {
+                return Err("observed benchmark suspended".into())
+            }
+        }
+    }
+}
 
-          #[cfg(not(feature = "bytecode-observation"))]
-          fn execute_observed(
-              _program: &std::rc::Rc<hara_wasm::vm::Program>,
-          ) -> Result<String, String> {
-              Err("execute-observed requires the bytecode-observation feature".into())
-          }
+#[cfg(not(feature = "bytecode-observation"))]
+fn execute_observed(
+    _program: &std::rc::Rc<hara_wasm::vm::Program>,
+) -> Result<String, String> {
+    Err("execute-observed requires the bytecode-observation feature".into())
+}
 
-          #[cfg(feature = "bytecode-instrumentation")]
-          fn display_outcome(outcome: hara_wasm::vm::VmOutcome) -> Result<String, String> {
-              match outcome {
-                  hara_wasm::vm::VmOutcome::Returned(value) => Ok(value.display()),
-                  hara_wasm::vm::VmOutcome::Failed(error) => Err(error.to_string()),
-                  hara_wasm::vm::VmOutcome::Suspended(_) => {
-                      Err("instrumented benchmark suspended".into())
-                  }
-              }
-          }
+#[cfg(feature = "bytecode-instrumentation")]
+fn display_outcome(outcome: hara_wasm::vm::VmOutcome) -> Result<String, String> {
+    match outcome {
+        hara_wasm::vm::VmOutcome::Returned(value) => Ok(value.display()),
+        hara_wasm::vm::VmOutcome::Failed(error) => Err(error.to_string()),
+        hara_wasm::vm::VmOutcome::Suspended(_) => {
+            Err("instrumented benchmark suspended".into())
+        }
+    }
+}
 
-          #[cfg(feature = "halc-encoder")]
-          fn compile_halc('''.replace('          ', '')
+#[cfg(feature = "halc-encoder")]
+fn compile_halc('''
           if marker not in text:
               raise SystemExit('benchmark helper insertion marker not found')
-          text = text.replace(marker, helpers, 1)
-          path.write_text(text)
+          path.write_text(text.replace(marker, helpers, 1))
           PY
       - name: Format and compile all benchmark modes
         run: |
