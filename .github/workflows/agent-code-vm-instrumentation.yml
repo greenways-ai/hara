@@ -75,7 +75,7 @@ jobs:
               text = text.replace(old, new, 1)
           tests.write_text(text)
           PY
-      - name: Format and validate the focused instrumentation slice
+      - name: Format the focused instrumentation slice
         run: |
           rustfmt --edition 2021 --config skip_children=true \
             core/rust/src/vm.rs \
@@ -83,13 +83,19 @@ jobs:
           rustfmt --edition 2021 --config skip_children=true \
             core/rust/src/vm/machine/instrumentation.rs \
             core/rust/src/vm/machine/instrumentation/tests.rs
+      - name: Test compact instrumentation
+        run: |
           cargo test --manifest-path core/rust/Cargo.toml \
             --lib \
             --features bytecode-instrumentation \
             vm::machine::instrumentation::tests
+      - name: Clippy compact instrumentation
+        run: |
           cargo clippy --manifest-path core/rust/Cargo.toml \
             --features bytecode-instrumentation \
             --lib --no-deps
+      - name: Check Rust module layout
+        run: |
           bash core/rust/scripts/check-layout.test.sh
           bash core/rust/scripts/check-layout.sh
       - name: Commit the materialized integration
