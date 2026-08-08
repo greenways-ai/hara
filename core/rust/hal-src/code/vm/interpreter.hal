@@ -70,7 +70,7 @@
 
 (defn- member
   [label allowed value]
-  (if (contains? allowed value)
+  (if (has? allowed value)
     value
     (invalid
      (str "Unsupported code.vm.interpreter " label ": " value)
@@ -93,7 +93,7 @@
        (>= (:event/id value) 0)
        (integer? (:event/sequence value))
        (>= (:event/sequence value) 0)
-       (contains? +event-kinds+ (:event/kind value))
+       (has? +event-kinds+ (:event/kind value))
        (or (nil? (:event/source value))
            (map? (:event/source value)))))
 
@@ -103,7 +103,7 @@
        (= +journal-schema+ (:journal/schema value))
        (string? (:journal/id value))
        (> (count (:journal/id value)) 0)
-       (contains? +journal-statuses+ (:journal/status value))
+       (has? +journal-statuses+ (:journal/status value))
        (vector? (:journal/events value))
        (every? event? (:journal/events value))
        (or (nil? (:journal/result value))

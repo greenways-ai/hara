@@ -43,7 +43,7 @@
 
 (defn- member
   [label allowed value]
-  (if (contains? allowed value)
+  (if (has? allowed value)
     value
     (invalid
      (str "Unsupported code.vm " label ": " value)
@@ -111,9 +111,9 @@
 (defn machine?
   [value]
   (and (map? value)
-       (contains? value :vm/id)
-       (contains? +vm-kinds+ (:vm/kind value))
-       (contains? +vm-statuses+ (:vm/status value))
+       (has? value :vm/id)
+       (has? +vm-kinds+ (:vm/kind value))
+       (has? +vm-statuses+ (:vm/status value))
        (integer? (:vm/step value))
        (map? (:vm/limits value))
        (vector? (:vm/trace value))))
@@ -154,11 +154,11 @@
 (defn transition?
   [value]
   (and (map? value)
-       (contains? value :step/id)
+       (has? value :step/id)
        (integer? (:step/index value))
        (keyword? (:step/stage value))
        (keyword? (:step/rule value))
-       (contains? +vm-statuses+ (:step/status value))
+       (has? +vm-statuses+ (:step/status value))
        (vector? (:step/events value))))
 
 (defn transition
@@ -184,7 +184,7 @@
         :step/index index
         :step/stage (keyword-value "transition stage" stage)
         :step/rule (keyword-value "transition rule" rule)
-        :step/before (if (contains? options :before)
+        :step/before (if (has? options :before)
                        (:before options)
                        (:vm/state machine))
         :step/after (map-value "transition state" after)
@@ -245,5 +245,5 @@
 
 (defn terminal?
   [machine]
-  (contains? +terminal-statuses+
-             (:vm/status (snapshot machine))))
+  (has? +terminal-statuses+
+        (:vm/status (snapshot machine))))
