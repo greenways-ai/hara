@@ -1,0 +1,103 @@
+;; ==========================================================================
+;; std.foundation.response-source — portable response-body source evidence.
+;;
+;; A response source is an ordinary closed Hara map. It identifies one
+;; immutable, bounded body source already owned by the current host work. The
+;; numeric handle is not authority by itself: hosts must bind it to the exact
+;; work that created it and close it on completion or cancellation.
+;; ==========================================================================
+(ns std.foundation.response-source)
+
+(def protocol
+  "hara.response-source/1")
+
+(def safe-integer-max
+  9007199254740991)
+
+(defn safe-integer?
+  "Returns true when value is an integer portable without precision loss."
+  [value]
+  (and
+   (integer? value)
+   (<= (- safe-integer-max) value)
+   (<= value safe-integer-max)))
+
+(defn positive-safe-integer?
+  [value]
+  (and
+   (safe-integer? value)
+   (> value 0)))
+
+(defn non-negative-safe-integer?
+  [value]
+  (and
+   (safe-integer? value)
+   (>= value 0)))
+
+(defn exact-fields?
+  [value]
+  (and
+   (map? value)
+   (= 4 (count value))
+   (has? value :protocol)
+   (has? value :source-handle)
+   (has? value :offset)
+   (has? value :length)))
+
+(defn response-source?
+  "Returns true for one closed hara.response-source/1 descriptor."
+  [value]
+  (and
+   (exact-fields? value)
+   (= protocol (get value :protocol))
+   (positive-safe-integer? (get value :source-handle))
+   (non-negative-safe-integer? (get value :offset))
+   (positive-safe-integer? (get value :length))
+   (<= (get value :offset)
+       (- safe-integer-max (get value :length)))))
+
+(defn invalid
+  [reason]
+  (throw
+   (ex-info
+    "invalid hara.response-source/1"
+    {:phase :response-source/invalid
+     :reason reason})))
+
+(defn require-response-source
+  "Returns value when it is a valid response source, otherwise throws."
+  [value]
+  (if
+   (response-source? value)
+   value
+   (invalid :descriptor)))
+
+(defn response-source
+  "Constructs a closed immutable response-body source descriptor."
+  ([source-handle length]
+   (response-source source-handle 0 length))
+  ([source-handle offset length]
+   (require-response-source
+    {:protocol protocol
+     :source-handle source-handle
+     :offset offset
+     :length length})))
+
+(defn source-handle
+  [value]
+  (get (require-response-source value) :source-handle))
+
+(defn source-offset
+  [value]
+  (get (require-response-source value) :offset))
+
+(defn source-length
+  [value]
+  (get (require-response-source value) :length))
+
+(defn source-end
+  "Returns the exclusive end offset without exceeding the safe integer range."
+  [value]
+  (let [source (require-response-source value)]
+    (+ (get source :offset)
+       (get source :length))))
