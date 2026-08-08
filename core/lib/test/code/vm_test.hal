@@ -1,0 +1,103 @@
+(ns code.vm-test
+  (:require [code.vm :as vm]
+            [std.block :as block]
+            [std.lib.test :as test]))
+
+(defn advance-example
+  [machine stage rule state options]
+  (vm/advance
+   machine
+   (vm/transition machine stage rule state options)))
+
+(def results
+  [(test/check
+    "machine snapshots use one portable contract"
+    (let [machine
+          (vm/machine
+           :interpreter
+           '(+ 1 (* 2 3))
+           {:id "vm/example"
+            :state {:expression '(+ 1 (* 2 3))}
+            :limits {:history 2}})]
+      [(:vm/id machine)
+       (:vm/kind machine)
+       (:vm/status machine)
+       (:vm/step machine)
+       (get-in machine [:vm/limits :history])
+       (vm/terminal? machine)])
+    ["vm/example" :interpreter :ready 0 2 false])
+
+   (test/check
+    "transitions advance status, state, result, and trace"
+    (let [initial
+          (vm/machine
+           :interpreter
+           '(+ 1 2)
+           {:id "vm/steps"
+            :state {:expression '(+ 1 2)}})
+          running
+          (advance-example
+           initial
+           :evaluate
+           :call/primitive
+           {:expression 3}
+           {:source {:path []}})
+          returned
+          (advance-example
+           running
+           :return
+           :machine/return
+           {:expression 3}
+           {:status :returned
+            :result 3
+            :source {:path []}})]
+      [(:vm/step returned)
+       (:vm/status returned)
+       (:vm/result returned)
+       (:vm/state returned)
+       (vec (map :step/index (vm/trace returned)))
+       (vm/terminal? returned)])
+    [2 :returned 3 {:expression 3} [1 2] true])
+
+   (test/check
+    "trace history retains the configured suffix"
+    (let [initial
+          (vm/machine
+           :bytecode
+           '(+ 1 2)
+           {:id "vm/history"
+            :limits {:history 2}})
+          first
+          (advance-example initial :execute :bytecode/const
+                           {:ip 1} {})
+          second
+          (advance-example first :execute :bytecode/const
+                           {:ip 2} {})
+          third
+          (advance-example second :execute :bytecode/return
+                           {:ip 3}
+                           {:status :returned
+                            :result 3})]
+      [(:vm/step third)
+       (vec (map :step/index (vm/trace third)))])
+    [3 [2 3]])
+
+   (test/check
+    "invalid VM kinds fail before adapter creation"
+    (try
+      (do
+        (vm/machine :scheme '(+ 1 2))
+        false)
+      (catch Throwable error
+        true))
+    true)
+
+   (test/check
+    "code.vm consumes the canonical std.block implementation"
+    (let [parsed (block/parse-string "(+ 1 2)")]
+      [(block/string parsed)
+       (block/value parsed)
+       (block/tag (block/parse-first "(+ 1 2)"))])
+    ["(+ 1 2)" '(+ 1 2) :list])])
+
+(test/print-results results)

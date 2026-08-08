@@ -1,0 +1,249 @@
+(ns code.vm.model)
+
+(def +vm-kinds+
+  #{:interpreter :halc :bytecode})
+
+(def +vm-statuses+
+  #{:ready :running :suspended :returned :failed :cancelled})
+
+(def +terminal-statuses+
+  #{:returned :failed :cancelled})
+
+(def +limit-keys+
+  [:source-bytes :steps :depth :values :history])
+
+(def +default-limits+
+  {:source-bytes 1048576
+   :steps 1000
+   :depth 64
+   :values 256
+   :history 256})
+
+(defn- invalid
+  [message data]
+  (throw (ex-info message data)))
+
+(defn- map-value
+  [label value]
+  (if (map? value)
+    value
+    (invalid
+     (str "code.vm " label " must be a map")
+     {:field label
+      :value value})))
+
+(defn- vector-value
+  [label value]
+  (if (vector? value)
+    value
+    (invalid
+     (str "code.vm " label " must be a vector")
+     {:field label
+      :value value})))
+
+(defn- member
+  [label allowed value]
+  (if (contains? allowed value)
+    value
+    (invalid
+     (str "Unsupported code.vm " label ": " value)
+     {:field label
+      :value value
+      :allowed allowed})))
+
+(defn- keyword-value
+  [label value]
+  (if (keyword? value)
+    value
+    (invalid
+     (str "code.vm " label " must be a keyword")
+     {:field label
+      :value value})))
+
+(defn- non-empty-string
+  [label value]
+  (if (and (string? value)
+           (> (count value) 0))
+    value
+    (invalid
+     (str "code.vm " label " must be a non-empty string")
+     {:field label
+      :value value})))
+
+(defn- non-negative-integer
+  [label value]
+  (if (and (integer? value)
+           (>= value 0))
+    value
+    (invalid
+     (str "code.vm " label " must be a non-negative integer")
+     {:field label
+      :value value})))
+
+(defn- positive-integer
+  [label value]
+  (if (and (integer? value)
+           (> value 0))
+    value
+    (invalid
+     (str "code.vm limit " label " must be a positive integer")
+     {:field label
+      :value value})))
+
+(defn normalize-limits
+  [value]
+  (let [limits (merge +default-limits+
+                      (map-value "limits" (or value {})))]
+    (reduce
+     (fn [out key]
+       (assoc out key
+              (positive-integer key (get limits key))))
+     {}
+     +limit-keys+)))
+
+(defn default-id
+  [kind]
+  (case kind
+    :interpreter "vm/interpreter"
+    :halc "vm/halc"
+    :bytecode "vm/bytecode"))
+
+(defn machine?
+  [value]
+  (and (map? value)
+       (contains? value :vm/id)
+       (contains? +vm-kinds+ (:vm/kind value))
+       (contains? +vm-statuses+ (:vm/status value))
+       (integer? (:vm/step value))
+       (map? (:vm/limits value))
+       (vector? (:vm/trace value))))
+
+(defn machine
+  ([kind input]
+   (machine kind input {}))
+  ([kind input options]
+   (let [options (map-value "options" (or options {}))
+         kind (member "kind" +vm-kinds+ kind)
+         status (member "status"
+                        +vm-statuses+
+                        (or (:status options) :ready))
+         id (non-empty-string
+             "id"
+             (or (:id options) (default-id kind)))
+         step (non-negative-integer
+               "step"
+               (or (:step options) 0))
+         trace (vector-value
+                "trace"
+                (vec (or (:trace options) [])))]
+     {:vm/id id
+      :vm/kind kind
+      :vm/status status
+      :vm/input input
+      :vm/options (map-value "adapter options"
+                             (or (:options options) {}))
+      :vm/state (map-value "state"
+                           (or (:state options) {}))
+      :vm/position (:position options)
+      :vm/step step
+      :vm/limits (normalize-limits (:limits options))
+      :vm/trace trace
+      :vm/result (:result options)
+      :vm/error (:error options)})))
+
+(defn transition?
+  [value]
+  (and (map? value)
+       (contains? value :step/id)
+       (integer? (:step/index value))
+       (keyword? (:step/stage value))
+       (keyword? (:step/rule value))
+       (contains? +vm-statuses+ (:step/status value))
+       (vector? (:step/events value))))
+
+(defn transition
+  ([machine stage rule after]
+   (transition machine stage rule after {}))
+  ([machine stage rule after options]
+   (if (not (machine? machine))
+     (invalid "code.vm transition requires a machine"
+              {:value machine})
+     (let [options (map-value "transition options" (or options {}))
+           index (non-negative-integer
+                  "transition index"
+                  (or (:index options)
+                      (inc (:vm/step machine))))
+           id (non-empty-string
+               "transition id"
+               (or (:id options)
+                   (str (:vm/id machine) "/step/" index)))
+           status (member "transition status"
+                          +vm-statuses+
+                          (or (:status options) :running))]
+       {:step/id id
+        :step/index index
+        :step/stage (keyword-value "transition stage" stage)
+        :step/rule (keyword-value "transition rule" rule)
+        :step/before (if (contains? options :before)
+                       (:before options)
+                       (:vm/state machine))
+        :step/after (map-value "transition state" after)
+        :step/source (:source options)
+        :step/events (vector-value
+                      "transition events"
+                      (vec (or (:events options) [])))
+        :step/status status
+        :step/result (:result options)
+        :step/error (:error options)}))))
+
+(defn- bounded-trace
+  [trace limit]
+  (let [trace (vec trace)
+        overflow (- (count trace) limit)]
+    (if (> overflow 0)
+      (vec (drop overflow trace))
+      trace)))
+
+(defn advance
+  [machine transition]
+  (if (not (machine? machine))
+    (invalid "code.vm advance requires a machine"
+             {:value machine})
+    (if (not (transition? transition))
+      (invalid "code.vm advance requires a transition"
+               {:value transition})
+      (let [expected (inc (:vm/step machine))
+            actual (:step/index transition)]
+        (if (not= expected actual)
+          (invalid
+           "code.vm transition index does not follow the machine"
+           {:vm/id (:vm/id machine)
+            :expected expected
+            :actual actual})
+          (let [trace (bounded-trace
+                       (conj (:vm/trace machine) transition)
+                       (get-in machine [:vm/limits :history]))]
+            (assoc machine
+                   :vm/status (:step/status transition)
+                   :vm/state (:step/after transition)
+                   :vm/position (:step/source transition)
+                   :vm/step actual
+                   :vm/trace trace
+                   :vm/result (:step/result transition)
+                   :vm/error (:step/error transition))))))))
+
+(defn snapshot
+  [machine]
+  (if (machine? machine)
+    machine
+    (invalid "code.vm snapshot requires a machine"
+             {:value machine})))
+
+(defn trace
+  [machine]
+  (vec (:vm/trace (snapshot machine))))
+
+(defn terminal?
+  [machine]
+  (contains? +terminal-statuses+
+             (:vm/status (snapshot machine))))
