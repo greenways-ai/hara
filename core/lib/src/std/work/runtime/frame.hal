@@ -1,6 +1,7 @@
 (ns std.work.runtime.frame
   (:require [std.work.protocol :as protocol]
-            [std.work.runtime.base :as base]))
+            [std.work.runtime.base :as base]
+            [std.work.runtime.store :as store]))
 
 (defn node-id
   ([spec]
@@ -52,7 +53,9 @@
                 :node/path (:node/path frame)
                 :item/id (:item/id frame)}
                (or data {}))
-        stored (base/backend-call (base/runtime-backend runtime) :append-event record)
+        stored (store/call (base/runtime-store runtime)
+                           :append-event
+                           record)
         observer (base/runtime-observer runtime)]
     (if observer
       (try
@@ -82,7 +85,9 @@
   [runtime frame]
   (= :cancelled
      (:run/status
-      (base/backend-call (base/runtime-backend runtime) :load-run (:run/id frame)))))
+      (store/call (base/runtime-store runtime)
+                  :load-run
+                  (:run/id frame)))))
 
 (defn assert-running!
   [runtime frame]
@@ -90,7 +95,6 @@
            (cancelled? runtime frame))
     (throw
      (ex-info "Work run has been cancelled" {:run/id (:run/id frame)}))))
-
 
 (defn explicit-item?
   [item]

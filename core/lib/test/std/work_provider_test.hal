@@ -1,0 +1,87 @@
+(ns std.work-provider-test
+  (:require [std.lib.test :as test]
+            [std.work :as work]
+            [std.work.runtime.base :as runtime-base]))
+
+(def provider-backend (work/memory-backend))
+
+(def provider-store
+  {:provider/role :work/store
+   :provider/id :test-memory
+   :provider/capabilities #{:runs :events :checkpoints}
+   :provider/operations provider-backend})
+
+(def executor-count (atom 0))
+
+(def provider-executor
+  {:provider/role :work/executor
+   :provider/id :test-executor
+   :provider/capabilities #{:synchronous}
+   :provider/operations
+   {:execute
+    (fn [runtime frame item input]
+      (swap! executor-count inc)
+      {:input input
+       :work/id (:id (work/work-spec item))})}})
+
+(def provider-runtime
+  (work/local-runtime
+   {:store provider-store
+    :executor provider-executor}))
+
+(def provider-reference
+  (work/start provider-runtime
+              (work/pure :provider-work
+                (fn [input context] input))
+              5
+              {:id "provider-1"}))
+
+(def runs-only-backend
+  (dissoc
+   (dissoc
+    (dissoc (work/memory-backend) :load-checkpoint)
+    :commit-checkpoint)
+   :list-checkpoints))
+
+(def runs-only-store
+  {:provider/role :work/store
+   :provider/id :runs-only
+   :provider/capabilities #{:runs :events}
+   :provider/operations runs-only-backend})
+
+(def results
+  [(test/check
+    "store, executor, and receipt providers are independently visible"
+    [(work/status provider-runtime provider-reference)
+     (work/result provider-runtime provider-reference)
+     (:provider/role (runtime-base/runtime-store provider-runtime))
+     (:provider/id (runtime-base/runtime-store provider-runtime))
+     (:provider/role (runtime-base/runtime-executor provider-runtime))
+     (:provider/id (runtime-base/runtime-executor provider-runtime))
+     (:provider/role (runtime-base/runtime-receipt provider-runtime))
+     (:provider/id (runtime-base/runtime-receipt provider-runtime))
+     (deref executor-count)]
+    [:completed
+     {:input 5 :work/id :provider-work}
+     :work/store
+     :test-memory
+     :work/executor
+     :test-executor
+     :work/receipt
+     :disabled
+     1])
+
+   (test/check-error
+    "durable runtimes require checkpoint-capable stores"
+    (work/durable-runtime {:store runs-only-store}))
+
+   (test/check-error
+    "provider roles cannot be substituted accidentally"
+    (work/local-runtime
+     {:store
+      {:provider/role :work/executor
+       :provider/id :wrong-role
+       :provider/capabilities #{}
+       :provider/operations {}}}))])
+
+(test/print-results results)

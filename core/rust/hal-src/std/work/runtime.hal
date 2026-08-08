@@ -1,9 +1,12 @@
 (ns std.work.runtime
-  (:require [std.work.runtime.base :as base]
-            [std.work.runtime.backend :as backend]
+  (:require [std.work.provider.inline :as inline]
+            [std.work.provider.memory :as memory]
+            [std.work.runtime.base :as base]
+            [std.work.runtime.coordinator :as coordinator]
+            [std.work.runtime.execution :as execution]
             [std.work.runtime.frame :as frame]
-            [std.work.runtime.handler :as handler]
-            [std.work.runtime.lifecycle :as lifecycle]))
+            [std.work.runtime.receipt :as receipt]
+            [std.work.runtime.store :as store]))
 
 (def work-value base/work-value)
 (def work-spec-map base/work-spec-map)
@@ -12,20 +15,43 @@
 (def observer base/observer)
 (def recording-observer base/recording-observer)
 (def observer-events base/observer-events)
-(def memory-backend backend/memory-backend)
+
+;; Retained public compatibility constructor. Runtime construction normalises
+;; this legacy operation map into a role-specific store provider.
+(def memory-backend memory/memory-backend)
+(def memory-store memory/memory-store)
+
 (def checkpoint-key frame/checkpoint-key)
 (def manifest-values frame/manifest-values)
-(def register-work lifecycle/register-work)
+(def register-work coordinator/register-work)
+
+(defn configured-store
+  [options]
+  (store/normalise-provider
+   (or (:store options)
+       (:backend options)
+       (memory/memory-store))))
+
+(defn configured-executor
+  [options]
+  (let [provider
+        (execution/normalise-provider
+         (or (:executor options)
+             (inline/inline-executor)))]
+    (execution/with-handlers provider (:handlers options))))
 
 (defn runtime
   [mode options]
   (let [options (or options {})
-        handlers (merge handler/default-handlers
-                        (or (:handlers options) {}))]
+        store-provider (configured-store options)
+        _ (store/assert-profile! store-provider mode)
+        executor-provider (configured-executor options)
+        receipt-provider (receipt/normalise-provider (:receipt options))]
     (std.work.runtime.base/Runtime
      mode
-     (or (:backend options) (backend/memory-backend))
-     handlers
+     store-provider
+     executor-provider
+     receipt-provider
      (:observer options)
      (atom {})
      (or (:runtime-version options) 1)
@@ -47,8 +73,12 @@
   [runtime operation handler]
   (std.work.runtime.base/Runtime
    (base/runtime-mode runtime)
-   (base/runtime-backend runtime)
-   (assoc (base/runtime-handlers runtime) operation handler)
+   (base/runtime-store runtime)
+   (execution/with-handler
+    (base/runtime-executor runtime)
+    operation
+    handler)
+   (base/runtime-receipt runtime)
    (base/runtime-observer runtime)
    (base/runtime-definitions runtime)
    (base/runtime-code-version runtime)

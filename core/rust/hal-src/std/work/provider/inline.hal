@@ -1,0 +1,15 @@
+(ns std.work.provider.inline
+  (:require [std.work.runtime.execution :as execution]))
+
+(defn inline-executor
+  ([]
+   (inline-executor {}))
+  ([handlers]
+   (execution/normalise-provider
+    {:provider/role :work/executor
+     :provider/id :inline
+     :provider/capabilities #{:synchronous :sequential :cleanup}
+     :provider/operations {:execute execution/execute-node}
+     :provider/handlers
+     (merge execution/default-handlers
+            (or handlers {}))})))
