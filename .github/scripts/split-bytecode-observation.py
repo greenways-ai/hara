@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 
 root = Path("core/rust/src/vm")
 observation_path = root / "machine/observation.rs"
@@ -31,8 +30,9 @@ for name in (
     "position_snapshot",
     "instruction_snapshot",
 ):
-    project, count = re.subn(rf"(?m)^fn {name}\\b", f"pub(super) fn {name}", project, count=1)
-    assert count == 1, f"projection helper {name} changed"
+    needle = f"fn {name}"
+    assert project.count(needle) == 1, f"projection helper {name} changed"
+    project = project.replace(needle, f"pub(super) fn {name}", 1)
 (root / "machine/observation/project.rs").write_text("use super::*;\n\n" + project)
 source = (
     source[:project_start]
