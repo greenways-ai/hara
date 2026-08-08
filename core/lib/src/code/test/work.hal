@@ -12,13 +12,22 @@
 (def execution-options test/work-execution-options)
 (def suite-work test/suite-work)
 
+(defn fact-identity
+  [value]
+  (str value))
+
 (defn fact-coordinate
   [namespace name fact-revision]
-  [:test/fact namespace name fact-revision])
+  [:test/fact
+   (fact-identity namespace)
+   (fact-identity name)
+   fact-revision])
 
 (defn resolve-fact
   [namespace name]
-  (let [fact (test/get-fact namespace name)]
+  (let [namespace (fact-identity namespace)
+        name (fact-identity name)
+        fact (test/get-fact namespace name)]
     (if fact
       fact
       (throw
