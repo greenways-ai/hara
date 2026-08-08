@@ -111,6 +111,12 @@ pub use compiler::{compile_halc_module, compile_source, compile_source_with};
 pub use disassemble::disassemble;
 pub use error::{CompileError, CompileErrorKind, ValidationError, VmError};
 pub use fiber::{VmFiber, VmFiberState};
+#[cfg(feature = "bytecode-instrumentation")]
+pub use machine::instrumentation::{
+    BytecodeMetrics, CounterProbe, EventRing, InstructionEvent, NoProbe, Opcode, SampledProbe,
+    TerminalEvent, TerminalKind, TransitionEvent, TransitionKind, VmEvent, VmProbe,
+    BYTECODE_EVENTS_SCHEMA, BYTECODE_METRICS_SCHEMA,
+};
 #[cfg(feature = "bytecode-observation")]
 pub use machine::observation::{
     CallFrameSnapshot, HandlerSnapshot, InstructionOperand, InstructionSnapshot,
