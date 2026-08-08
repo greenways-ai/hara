@@ -27,26 +27,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - name: Add the machine child module and public metric projection
+      - name: Add the machine child module without growing the legacy facade
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           machine = Path('core/rust/src/vm/machine.rs')
           text = machine.read_text()
-          marker = '''#[cfg(feature = "bytecode-observation")]
-          #[path = "machine/observation.rs"]
-          pub mod observation;
-          '''.replace('          ', '')
-          addition = marker + '''
-          #[cfg(feature = "bytecode-instrumentation")]
-          #[path = "machine/instrumentation.rs"]
-          pub mod instrumentation;
-          '''.replace('          ', '')
+          marker = '''#[path = "machine/globals.rs"]
+          mod globals;
+
+          #[cfg(feature = "bytecode-observation")]'''.replace('          ', '')
+          replacement = '''#[path = "machine/globals.rs"]
+          mod globals;
+          #[cfg(feature = "bytecode-instrumentation")] #[path = "machine/instrumentation.rs"] pub mod instrumentation;
+          #[cfg(feature = "bytecode-observation")]'''.replace('          ', '')
           if 'pub mod instrumentation;' not in text:
               if marker not in text:
-                  raise SystemExit('machine observation marker not found')
-              text = text.replace(marker, addition, 1)
+                  raise SystemExit('machine module insertion marker not found')
+              text = text.replace(marker, replacement, 1)
           machine.write_text(text)
 
           vm = Path('core/rust/src/vm.rs')
@@ -57,12 +56,10 @@ jobs:
               text = text.replace(old, new, 1)
           vm.write_text(text)
           PY
-      - name: Format the focused instrumentation slice
+      - name: Format the focused instrumentation modules
         run: |
           rustfmt --edition 2021 --config skip_children=true \
             core/rust/src/vm.rs \
-            core/rust/src/vm/machine.rs
-          rustfmt --edition 2021 --config skip_children=true \
             core/rust/src/vm/machine/instrumentation.rs \
             core/rust/src/vm/machine/instrumentation/ring.rs \
             core/rust/src/vm/machine/instrumentation/run.rs \
