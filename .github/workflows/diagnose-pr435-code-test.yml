@@ -64,13 +64,12 @@ jobs:
           phase = os.environ["PHASE"]
           source = sources[phase]
           replacement = f'''    #[test]
-              fn namespace_use_refers_portable_test_vars_and_macros() {{
-                  let mut runtime = Runtime::new();
-                  runtime.load_embedded_namespace("code.test").unwrap();
-                  eprintln!("phase={phase}");
-                  let result = runtime.eval_text(r###"{source}"###).unwrap();
-                  eprintln!("phase={phase} result={{result}}");
-              }}
+          fn namespace_use_refers_portable_test_vars_and_macros() {{
+              let mut runtime = Runtime::new();
+              eprintln!("phase={phase}");
+              let result = runtime.eval_text(r###"{source}"###).unwrap();
+              eprintln!("phase={phase} result={{result}}");
+          }}
 
           '''
           path.write_text(text[:start] + replacement + text[end:])
