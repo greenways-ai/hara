@@ -140,9 +140,7 @@ fn main() {
             "execute-instrumented-noop"
             | "execute-counted"
             | "execute-sampled"
-            | "execute-events" => {
-                execute_instrumented(program.as_ref().expect("program"), mode)
-            }
+            | "execute-events" => execute_instrumented(program.as_ref().expect("program"), mode),
             "execute-observed" => execute_observed(program.as_ref().expect("program")),
             "runtime-compile-execute" => runtime.eval_bytecode_native(&source),
             "runtime-execute" => {
@@ -273,9 +271,7 @@ fn execute_instrumented(
 }
 
 #[cfg(feature = "bytecode-observation")]
-fn execute_observed(
-    program: &std::rc::Rc<hara_wasm::vm::Program>,
-) -> Result<String, String> {
+fn execute_observed(program: &std::rc::Rc<hara_wasm::vm::Program>) -> Result<String, String> {
     use hara_wasm::vm::{Machine, ObservedStepOutcome};
 
     let mut machine = Machine::entry(program.clone());
@@ -284,17 +280,13 @@ fn execute_observed(
             ObservedStepOutcome::Continue => {}
             ObservedStepOutcome::Returned(value) => return Ok(value.display()),
             ObservedStepOutcome::Failed(error) => return Err(error.to_string()),
-            ObservedStepOutcome::Suspended(_) => {
-                return Err("observed benchmark suspended".into())
-            }
+            ObservedStepOutcome::Suspended(_) => return Err("observed benchmark suspended".into()),
         }
     }
 }
 
 #[cfg(not(feature = "bytecode-observation"))]
-fn execute_observed(
-    _program: &std::rc::Rc<hara_wasm::vm::Program>,
-) -> Result<String, String> {
+fn execute_observed(_program: &std::rc::Rc<hara_wasm::vm::Program>) -> Result<String, String> {
     Err("execute-observed requires the bytecode-observation feature".into())
 }
 
@@ -303,9 +295,7 @@ fn display_outcome(outcome: hara_wasm::vm::VmOutcome) -> Result<String, String> 
     match outcome {
         hara_wasm::vm::VmOutcome::Returned(value) => Ok(value.display()),
         hara_wasm::vm::VmOutcome::Failed(error) => Err(error.to_string()),
-        hara_wasm::vm::VmOutcome::Suspended(_) => {
-            Err("instrumented benchmark suspended".into())
-        }
+        hara_wasm::vm::VmOutcome::Suspended(_) => Err("instrumented benchmark suspended".into()),
     }
 }
 

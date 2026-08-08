@@ -511,13 +511,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hara-hta"
-version = "0.1.0"
-dependencies = [
- "hara-abi",
-]
-
-[[package]]
 name = "hara-vm"
 version = "0.1.0"
 dependencies = [
@@ -531,7 +524,6 @@ dependencies = [
  "console_error_panic_hook",
  "ed25519-dalek",
  "hara-abi",
- "hara-hta",
  "home",
  "js-sys",
  "rustyline",
