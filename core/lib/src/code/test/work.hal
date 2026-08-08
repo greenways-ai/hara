@@ -12,6 +12,16 @@
 (def execution-options test/work-execution-options)
 (def suite-work test/suite-work)
 
+(def +unsupported-batch-options+
+  [:before-all
+   :after-all
+   :before-each
+   :after-each
+   :fail-fast
+   :reporter
+   :control
+   :cancelled])
+
 (defn fact-identity
   [value]
   (str value))
@@ -22,6 +32,11 @@
    (fact-identity namespace)
    (fact-identity name)
    fact-revision])
+
+(defn fact-revision
+  [fact default-revision]
+  (or (:test/revision (:meta fact))
+      default-revision))
 
 (defn resolve-fact
   [namespace name]
@@ -53,6 +68,192 @@
          (resolve-fact namespace name)
          reporter
          options))))))
+
+(defn unsupported-batch-options
+  [options]
+  (reduce
+   (fn [output key]
+     (if (and (has? options key)
+              (not (nil? (get options key)))
+              (not (= false (get options key))))
+       (conj output key)
+       output))
+   []
+   +unsupported-batch-options+))
+
+(defn assert-batch-options!
+  [options]
+  (let [unsupported (unsupported-batch-options options)]
+    (if (seq unsupported)
+      (throw
+       (ex-info
+        "Fact batch execution does not support suite lifecycle, fail-fast, reporters, or test cancellation"
+        {:unsupported unsupported
+         :options options})))
+    options))
+
+(defn selected-facts
+  [options]
+  (test/order-facts
+   (vec
+    (filter
+     (fn [fact]
+       (test/matches-selection? fact options))
+     (test/tests)))))
+
+(defn data-options
+  [input context]
+  (merge (test/normalize-run-options input)
+         (or (:test/options context) {})))
+
+(defn assert-global-batch-options!
+  [facts]
+  (reduce
+   (fn [_ fact]
+     (let [options
+           (or (get (deref test/+global-settings+)
+                    (:namespace fact))
+               {})]
+       (assert-batch-options! options)))
+   nil
+   facts)
+  facts)
+
+(defn fact-item
+  [fact options default-revision]
+  (let [fact-revision (fact-revision fact default-revision)]
+    {:item/id
+     (fact-coordinate (:namespace fact)
+                      (:name fact)
+                      fact-revision)
+     :item/value
+     {:namespace (fact-identity (:namespace fact))
+      :name (fact-identity (:name fact))
+      :test/revision fact-revision
+      :test/options options}}))
+
+(defn fact-manifest
+  [input context default-revision]
+  (let [options (data-options input context)
+        effective-options (execution-options options context)
+        validated-options (assert-batch-options! effective-options)
+        facts (selected-facts validated-options)
+        validated-facts (assert-global-batch-options! facts)]
+    (vec
+     (map
+      (fn [fact]
+        (fact-item fact options default-revision))
+      validated-facts))))
+
+(defn summary-from-results
+  [results]
+  (let [counts (test/result-counts results)
+        checks (test/attach-check-total
+                (test/check-counts results))
+        status (if (and (= 0 (:failed counts))
+                        (= 0 (:error counts))
+                        (= 0 (:timeout counts)))
+                 :passed
+                 :failed)
+        namespaces
+        (reduce
+         (fn [output result]
+           (conj output (:namespace result)))
+         #{}
+         results)]
+    {:status status
+     :counts counts
+     :check-counts checks
+     :files (count namespaces)
+     :facts (count results)
+     :checks (:total checks)
+     :passed (:passed checks)
+     :failed (:failed checks)
+     :throw (:error counts)
+     :timeout (:timeout counts)
+     :results results}))
+
+(defn process-fact-item
+  [subject context]
+  (let [options
+        (execution-options (:test/options subject) context)
+        validated-options (assert-batch-options! options)]
+    (test/run-fact
+     (resolve-fact (:namespace subject)
+                   (:name subject))
+     test/+null-reporter+
+     validated-options)))
+
+(defn summarise-fact-batch
+  [batch context]
+  (summary-from-results
+   (work/manifest-values (:results batch))))
+
+(defn fact-batch-work
+  "Returns an opt-in fact graph with one durable checkpoint per selected fact.
+
+   Fact-local metadata hooks remain inside each checkpoint. Suite-wide fixtures,
+   fail-fast, external reporters, and test-level cancellation are rejected until
+   the runtime can preserve their ordering and cleanup guarantees explicitly."
+  ([]
+   (fact-batch-work +default-revision+))
+  ([batch-revision]
+   (work/batch
+    {:id 'code.test/fact-batch
+     :version batch-revision
+     :test/revision batch-revision}
+    {:list
+     (work/pure
+      {:id 'code.test/fact-list
+       :version batch-revision}
+      (fn [input context]
+        (fact-manifest input context batch-revision)))
+
+     :process
+     (work/step
+      {:id 'code.test/fact-run
+       :version batch-revision}
+      process-fact-item)
+
+     :summarise
+     (work/pure
+      {:id 'code.test/fact-summary
+       :version batch-revision}
+      summarise-fact-batch)})))
+
+(defn batch-summary
+  [result]
+  (:summary result))
+
+(defn run-batch
+  "Runs selected facts as independently checkpointed batch items and returns
+   the ordinary code.test summary."
+  ([runtime]
+   (run-batch runtime {} {}))
+  ([runtime options]
+   (run-batch runtime options {}))
+  ([runtime options work-options]
+   (let [options (test/normalize-run-options options)]
+     (batch-summary
+      (work/run runtime
+                (fact-batch-work (revision options))
+                options
+                work-options)))))
+
+(defn start-batch
+  "Starts independently checkpointed fact execution through an explicit runtime."
+  ([runtime options]
+   (start-batch runtime options {}))
+  ([runtime options work-options]
+   (let [options (test/normalize-run-options options)]
+     (work/start runtime
+                 (fact-batch-work (revision options))
+                 options
+                 work-options))))
+
+(defn batch-result
+  [runtime reference]
+  (batch-summary (work/result runtime reference)))
 
 (defn run
   "Runs a selected test suite through an explicit IWorkRuntime."
