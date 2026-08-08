@@ -138,23 +138,52 @@ hara package install packages/core
 hara package publish --tap hara --dry-run packages/core
 ```
 
-Repositories containing several packages can use `code.deploy`. It wraps the
-same CLI operations in `std.lib.task`, accepts a data catalog with `:path`,
-`:depends`, and per-package `:options`, and processes packages in stable
-dependency order. Its process boundary passes argv directly and never invokes a
-shell. `:runner` may be injected for tests or remote execution.
+Repositories containing several packages can use `code.deploy`. It exposes the
+same CLI operations as native `std.work` values, accepts a data catalog with
+`:path`, `:depends`, and per-package `:options`, and processes packages in
+stable dependency order. Package coordinates become stable work item
+identities, so durable runtimes can checkpoint each package boundary. The
+process capability is supplied through runtime context and argv is never
+interpreted by a shell.
 
 ```clojure
 (require '[code.deploy :as deploy])
+(require '[std.work :as work])
+
+(def runtime (work/local-runtime))
 
 (def packages
   {'example/core {:path "packages/core"}
    'example/addon {:path "packages/addon"
                    :depends ['example/core]}})
 
-(deploy/check :all {:packages packages})
-(deploy/package :all {:packages packages})
-(deploy/publish :all {:packages packages :tap :hara :dry-run true})
+(work/run runtime
+          deploy/check
+          {:selector :all
+           :packages packages})
+
+(work/run runtime
+          deploy/package
+          {:selector :all
+           :packages packages})
+
+(work/run runtime
+          deploy/publish
+          {:selector :all
+           :packages packages
+           :tap :hara
+           :dry-run true})
+```
+
+Tests and remote hosts can replace process authority without changing the work
+definition:
+
+```clojure
+(work/run runtime
+          deploy/package
+          {:selector :all
+           :packages packages}
+          {:context {:process/run runner}})
 ```
 
 ## Cloud development environment
