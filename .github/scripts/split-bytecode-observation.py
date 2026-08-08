@@ -15,11 +15,14 @@ assert all(not line or line.startswith("    ") for line in test_lines)
 tests_content = "\n".join(line[4:] if line else line for line in test_lines) + "\n"
 (root / "machine/observation").mkdir(parents=True, exist_ok=True)
 (root / "machine/observation/tests.rs").write_text(tests_content)
-source = source[:tests_start] + "#[cfg(test)]\nmod tests;\n"
+source = (
+    source[:tests_start]
+    + '#[cfg(test)]\n#[path = "observation/tests.rs"]\nmod tests;\n'
+)
 
 # Move value/instruction projection helpers into a small child module.
 project_start = source.index("fn slot_head")
-project_end = source.index("#[cfg(test)]\nmod tests;")
+project_end = source.index("#[cfg(test)]\n#[path = \"observation/tests.rs\"]\nmod tests;")
 project = source[project_start:project_end].rstrip() + "\n"
 for name in (
     "slot_head",
@@ -36,7 +39,7 @@ for name in (
 (root / "machine/observation/project.rs").write_text("use super::*;\n\n" + project)
 source = (
     source[:project_start]
-    + "mod project;\n"
+    + '#[path = "observation/project.rs"]\nmod project;\n'
     + "use project::{instruction_snapshot, position_snapshot, slot_head, slot_tail, value_snapshot};\n\n"
     + source[project_end:]
 )
