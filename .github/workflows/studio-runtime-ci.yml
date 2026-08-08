@@ -8,18 +8,24 @@ on:
       - .github/workflows/publish-rust-crates.yml
       - .github/workflows/publish-studio-runtime.yml
       - .github/workflows/studio-runtime-ci.yml
+      - packaging/scripts/build-bytecode-observation-wasm
       - packaging/scripts/build-studio-runtime
+      - packaging/scripts/build-studio-runtime-base
       - packaging/scripts/build-hara-wasm-raw
       - packaging/scripts/build-www
       - packaging/scripts/check-release-version.mjs
+      - packaging/scripts/verify-bytecode-observation-runtime.mjs
       - packaging/scripts/verify-studio-runtime.mjs
       - packaging/scripts/write-kernel-manifest.mjs
       - core/rust/Cargo.toml
       - core/rust/Cargo.lock
       - core/rust/compiler/Cargo.toml
+      - core/rust/observation-raw/**
       - core/rust/raw/**
       - core/rust/src/**
       - core/rust/vm-runtime/Cargo.toml
+      - core/rust/web/package.json
+      - core/rust/web/bytecode-observation.test.mjs
       - core/rust/web/hta.js
       - core/rust/web/hta-worker.js
       - core/rust/web/hta-shared-worker.js
@@ -38,18 +44,24 @@ on:
       - .github/workflows/publish-rust-crates.yml
       - .github/workflows/publish-studio-runtime.yml
       - .github/workflows/studio-runtime-ci.yml
+      - packaging/scripts/build-bytecode-observation-wasm
       - packaging/scripts/build-studio-runtime
+      - packaging/scripts/build-studio-runtime-base
       - packaging/scripts/build-hara-wasm-raw
       - packaging/scripts/build-www
       - packaging/scripts/check-release-version.mjs
+      - packaging/scripts/verify-bytecode-observation-runtime.mjs
       - packaging/scripts/verify-studio-runtime.mjs
       - packaging/scripts/write-kernel-manifest.mjs
       - core/rust/Cargo.toml
       - core/rust/Cargo.lock
       - core/rust/compiler/Cargo.toml
+      - core/rust/observation-raw/**
       - core/rust/raw/**
       - core/rust/src/**
       - core/rust/vm-runtime/Cargo.toml
+      - core/rust/web/package.json
+      - core/rust/web/bytecode-observation.test.mjs
       - core/rust/web/hta.js
       - core/rust/web/hta-worker.js
       - core/rust/web/hta-shared-worker.js
@@ -73,7 +85,7 @@ concurrency:
 jobs:
   archive:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,9 +110,19 @@ jobs:
 
       - name: Check packaging script syntax
         run: |
-          bash -n packaging/scripts/build-studio-runtime packaging/scripts/build-www
+          bash -n \
+            packaging/scripts/build-bytecode-observation-wasm \
+            packaging/scripts/build-studio-runtime \
+            packaging/scripts/build-studio-runtime-base \
+            packaging/scripts/build-www
           node --check packaging/scripts/check-release-version.mjs
+          node --check packaging/scripts/verify-bytecode-observation-runtime.mjs
           node --check packaging/scripts/write-kernel-manifest.mjs
+
+      - name: Test live bytecode observation boundary
+        run: |
+          cargo test --manifest-path core/rust/observation-raw/Cargo.toml
+          node --test core/rust/web/bytecode-observation.test.mjs
 
       - name: Verify release version surfaces
         shell: bash
@@ -123,11 +145,15 @@ jobs:
           sha256sum -c "$CHECKSUM"
           tar -tzf "$ARCHIVE" > "$RAW_LISTING"
           sed 's#^\./##' "$RAW_LISTING" > "$LISTING"
+          grep -Fxq 'rust/bytecode-observation.wasm' "$LISTING"
+          grep -Fxq 'rust/host/bytecode-observation.js' "$LISTING"
           grep -Fxq 'rust/packages/hta/index.js' "$LISTING"
           grep -Fxq 'rust/packages/hta/worker.js' "$LISTING"
           grep -Fxq 'rust/packages/hta/shared-worker.js' "$LISTING"
           grep -Fxq 'rust/studio/supersonic.js' "$LISTING"
           grep -Fxq 'rust/studio/hal/supersonic.hal' "$LISTING"
+          grep -Fxq 'examples/music/runtime/bytecode-observation.wasm' "$LISTING"
+          grep -Fxq 'examples/music/runtime/host/bytecode-observation.js' "$LISTING"
           grep -Fxq 'examples/music/runtime/packages/hta/index.js' "$LISTING"
           grep -Fxq 'examples/music/runtime/packages/hta/worker.js' "$LISTING"
           grep -Fxq 'examples/music/runtime/packages/hta/shared-worker.js' "$LISTING"
