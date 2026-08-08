@@ -1,6 +1,4 @@
-use super::{
-    InstructionEvent, TerminalEvent, TransitionEvent, VmProbe, BYTECODE_EVENTS_SCHEMA,
-};
+use super::{InstructionEvent, TerminalEvent, TransitionEvent, VmProbe, BYTECODE_EVENTS_SCHEMA};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VmEvent {

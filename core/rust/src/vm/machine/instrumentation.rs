@@ -360,9 +360,7 @@ impl VmProbe for CounterProbe {
     #[inline(always)]
     fn on_transition(&mut self, event: TransitionEvent) {
         match event.kind {
-            TransitionKind::CallEnter => {
-                self.metrics.calls = self.metrics.calls.saturating_add(1)
-            }
+            TransitionKind::CallEnter => self.metrics.calls = self.metrics.calls.saturating_add(1),
             TransitionKind::CallReturn => {
                 self.metrics.returns = self.metrics.returns.saturating_add(1)
             }
@@ -385,9 +383,7 @@ impl VmProbe for CounterProbe {
             TerminalKind::Return => {
                 self.metrics.terminal_returns = self.metrics.terminal_returns.saturating_add(1)
             }
-            TerminalKind::Fail => {
-                self.metrics.failures = self.metrics.failures.saturating_add(1)
-            }
+            TerminalKind::Fail => self.metrics.failures = self.metrics.failures.saturating_add(1),
         }
         self.observe_depths(event.stack_depth, event.call_depth);
     }
