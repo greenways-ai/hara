@@ -1,14 +1,14 @@
-(ns std.lib.block
+(ns std.block
   (:config {:blank true})
   (:require [std.foundation :refer :all :exclude [empty type]]
-            [std.lib.block.base :as base]
-            [std.lib.block.construct :as construct]
-            [std.lib.block.parse :as parse]
-            [std.lib.block.type :as type]
-            [std.lib.block.zip :as block-zip]
-            [std.lib.block.value :as block-value]
-            [std.lib.block.editor :as editor]
-            [std.lib.block.layout :as layout]))
+            [std.block.base :as base]
+            [std.block.construct :as construct]
+            [std.block.parse :as parse]
+            [std.block.type :as type]
+            [std.block.zip :as block-zip]
+            [std.block.value :as block-value]
+            [std.block.editor :as editor]
+            [std.block.layout :as layout]))
 
 (def block? base/block?)
 (def expression? base/expression?)

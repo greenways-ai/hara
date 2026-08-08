@@ -1,13 +1,13 @@
-(ns std.lib.block.construct
+(ns std.block.construct
   (:config {:blank true})
   (:require [std.foundation :refer :all :exclude [empty]]
-            [std.lib.block.type :as type]
+            [std.block.type :as type]
             [std.foundation.string :as string]
             [std.foundation.edn :as edn]))
 
 (defn raw-block
   [kind tag string value children props]
-  (std.lib.block.type/Block kind tag string value children props))
+  (std.block.type/Block kind tag string value children props))
 
 (defn text-height
   [text]
@@ -214,7 +214,7 @@
                                 (if (= index 0)
                                   children
                                   (conj children (space)))
-                                (std.lib.block.construct/block
+                                (std.block.construct/block
                                  (nth values index)))))))
                         value)
         (let [text (pr-str value)]

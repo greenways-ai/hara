@@ -11,12 +11,12 @@ import java.util.stream.StreamSupport;
 public interface Block {
   int TAB_WIDTH = 4;
 
-  // Helper from std.lib.block.check
+  // Helper from std.block.check
   static boolean isComment(String s) {
     return s != null && s.startsWith(";");
   }
 
-  // Helper from std.lib.block.check
+  // Helper from std.block.check
   static String voidTag(Character c) {
     if (c == null) return "eof";
     if (c == '\n' || c == '\r' || c == '\f') return "linebreak";

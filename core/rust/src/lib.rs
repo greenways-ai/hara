@@ -4851,9 +4851,9 @@ mod tests {
             runtime
                 .eval_text(
                     "(ns std-block-rust-probe \
-                       (:require [std.lib.block :as block] \
-                                 [std.lib.block.grid :as grid] \
-                                 [std.lib.block.reader :as reader])) \
+                       (:require [std.block :as block] \
+                                 [std.block.grid :as grid] \
+                                 [std.block.reader :as reader])) \
                      (let [parsed (block/parse-string \"[1 2 3]\") \
                            first-block (block/parse-first \"[1 2 3]\") \
                            spaces (block/spaces 3) \

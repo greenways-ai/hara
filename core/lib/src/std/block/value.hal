@@ -1,5 +1,5 @@
-(ns std.lib.block.value
-  (:require [std.lib.block.base :as base]
+(ns std.block.value
+  (:require [std.block.base :as base]
             [std.foundation.edn :as edn]))
 
 (defn child-values

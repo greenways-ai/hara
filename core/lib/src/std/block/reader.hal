@@ -1,12 +1,12 @@
-(ns std.lib.block.reader
-  (:require [std.lib.block.check :as check]
+(ns std.block.reader
+  (:require [std.block.check :as check]
             [std.foundation.string :as string]))
 
 (defstruct Reader [source state])
 
 (defn create
   [source]
-  (std.lib.block.reader/Reader source
+  (std.block.reader/Reader source
                                (atom {:position 0 :pushed []})))
 
 (defn reader-state [reader] (deref (field reader :state)))

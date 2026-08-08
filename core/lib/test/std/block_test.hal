@@ -1,8 +1,8 @@
-(ns std.lib.block-test
-  (:require [std.lib.block :as block]
-            [std.lib.block.check :as check]
-            [std.lib.block.grid :as grid]
-            [std.lib.block.reader :as reader]
+(ns std.block-test
+  (:require [std.block :as block]
+            [std.block.check :as check]
+            [std.block.grid :as grid]
+            [std.block.reader :as reader]
             [std.lib.test :as test]))
 
 (def results

@@ -1,4 +1,4 @@
-(ns std.lib.block.protocol)
+(ns std.block.protocol)
 
 (defprotocol IBlock
   (block-type [block])

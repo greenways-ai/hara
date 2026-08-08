@@ -1,5 +1,5 @@
-(ns std.lib.block.layout
-  (:require [std.lib.block.construct :as construct]))
+(ns std.block.layout
+  (:require [std.block.construct :as construct]))
 
 (def bindings
   '#{if let while ns if-let if-some if-not try when when-not

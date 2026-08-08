@@ -1,6 +1,6 @@
-(ns std.lib.block.zip
-  (:require [std.lib.block.base :as base]
-            [std.lib.block.construct :as construct]
+(ns std.block.zip
+  (:require [std.block.base :as base]
+            [std.block.construct :as construct]
             [std.lib.zip :as zip]))
 
 (defn block-context
