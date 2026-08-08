@@ -1,86 +1,97 @@
 (ns std.foundation.response-source-test
-  (:use code.test)
-  (:require [std.foundation.response-source :as source]))
+  (:require [std.lib.test :as test]
+            [std.foundation.response-source :as source]))
 
 (def valid
   (source/response-source 17 4 9))
 
-(def results
-  [(fact "constructs one closed portable response source"
-     valid
-     => {:protocol "hara.response-source/1"
-         :source-handle 17
-         :offset 4
-         :length 9})
+(test/print-results
+ [(test/check
+   "constructs one closed portable response source"
+   valid
+   {:protocol "hara.response-source/1"
+    :source-handle 17
+    :offset 4
+    :length 9})
 
-   (fact "the short constructor starts at offset zero"
-     (source/response-source 19 7)
-     => {:protocol "hara.response-source/1"
-         :source-handle 19
-         :offset 0
-         :length 7})
+  (test/check
+   "the short constructor starts at offset zero"
+   (source/response-source 19 7)
+   {:protocol "hara.response-source/1"
+    :source-handle 19
+    :offset 0
+    :length 7})
 
-   (fact "accessors preserve the bounded half-open interval"
-     [(source/source-handle valid)
-      (source/source-offset valid)
-      (source/source-length valid)
-      (source/source-end valid)]
-     => [17 4 9 13])
+  (test/check
+   "accessors preserve the bounded half-open interval"
+   [(source/source-handle valid)
+    (source/source-offset valid)
+    (source/source-length valid)
+    (source/source-end valid)]
+   [17 4 9 13])
 
-   (fact "the descriptor has an exact closed field set"
-     [(source/response-source? valid)
-      (source/response-source? (assoc valid :driver "memory"))
-      (source/response-source? (dissoc valid :length))
-      (source/response-source? (assoc valid :protocol "other/1"))]
-     => [true false false false])
+  (test/check
+   "the descriptor has an exact closed field set"
+   [(source/response-source? valid)
+    (source/response-source? (assoc valid :driver "memory"))
+    (source/response-source? (dissoc valid :length))
+    (source/response-source? (assoc valid :protocol "other/1"))]
+   [true false false false])
 
-   (fact "handles, offsets and lengths stay inside portable integer bounds"
-     [(source/response-source? (source/response-source 1 1))
-      (source/response-source? (source/response-source
-                                source/safe-integer-max
-                                0
-                                source/safe-integer-max))
-      (source/response-source? {:protocol source/protocol
-                                :source-handle 0
-                                :offset 0
-                                :length 1})
-      (source/response-source? {:protocol source/protocol
-                                :source-handle 1
-                                :offset -1
-                                :length 1})
-      (source/response-source? {:protocol source/protocol
-                                :source-handle 1
-                                :offset 0
-                                :length 0})
-      (source/response-source? {:protocol source/protocol
-                                :source-handle 1
-                                :offset source/safe-integer-max
-                                :length 1})]
-     => [true true false false false false])
+  (test/check
+   "handles, offsets and lengths stay inside portable integer bounds"
+   [(source/response-source? (source/response-source 1 1))
+    (source/response-source?
+     (source/response-source
+      source/safe-integer-max
+      0
+      source/safe-integer-max))
+    (source/response-source?
+     {:protocol source/protocol
+      :source-handle 0
+      :offset 0
+      :length 1})
+    (source/response-source?
+     {:protocol source/protocol
+      :source-handle 1
+      :offset -1
+      :length 1})
+    (source/response-source?
+     {:protocol source/protocol
+      :source-handle 1
+      :offset 0
+      :length 0})
+    (source/response-source?
+     {:protocol source/protocol
+      :source-handle 1
+      :offset source/safe-integer-max
+      :length 1})]
+   [true true false false false false])
 
-   (fact "invalid constructors fail with one stable application-neutral error"
-     (try
-       (source/response-source 0 0 1)
-       (catch Throwable error
-         [(ex-message error)
-          (ex-data error)]))
-     => ["invalid hara.response-source/1"
-         {:phase :response-source/invalid
-          :reason :descriptor}])
+  (test/check
+   "invalid constructors fail with one stable application-neutral error"
+   (try
+     (source/response-source 0 0 1)
+     (catch Throwable error
+       [(ex-message error)
+        (ex-data error)]))
+   ["invalid hara.response-source/1"
+    {:phase :response-source/invalid
+     :reason :descriptor}])
 
-   (fact "accessors reject forged descriptors through the same boundary"
-     (try
-       (source/source-length {:source-handle 17})
-       (catch Throwable error
-         (ex-data error)))
-     => {:phase :response-source/invalid
-         :reason :descriptor})
+  (test/check
+   "accessors reject forged descriptors through the same boundary"
+   (try
+     (source/source-length {:source-handle 17})
+     (catch Throwable error
+       (ex-data error)))
+   {:phase :response-source/invalid
+    :reason :descriptor})
 
-   (fact "numeric handles do not carry provider, path or credential metadata"
-     [(has? valid :provider)
-      (has? valid :path)
-      (has? valid :credentials)
-      (has? valid :work)]
-     => [false false false false])])
-
-(pr-str (run '[std.foundation.response-source-test]))
+  (test/check
+   "numeric handles do not carry provider, path or credential metadata"
+   [(has? valid :provider)
+    (has? valid :path)
+    (has? valid :credentials)
+    (has? valid :work)]
+   [false false false false])])
