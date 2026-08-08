@@ -1,0 +1,89 @@
+(ns code.test-work-test
+  (:require [code.test :as fact]
+            [code.test.work :as test-work]
+            [std.lib.test :as test]
+            [std.work :as work]))
+
+(def execution-count (atom 0))
+
+(fact/fact "work-driven passing fact"
+  (swap! execution-count inc)
+  1 => 1)
+
+(fact/fact "work-driven failing fact"
+  1 => 2)
+
+(def suite-runtime (work/durable-runtime))
+(def suite-reference
+  (test-work/start
+   suite-runtime
+   {:namespace 'code.test-work-test
+    :test/revision 7}
+   {:id "test-suite-1"}))
+(def suite-result
+  (work/result suite-runtime suite-reference))
+(def same-suite-reference
+  (test-work/start
+   suite-runtime
+   {:namespace 'code.test-work-test
+    :test/revision 7}
+   {:id "test-suite-1"}))
+
+(def fact-runtime (work/durable-runtime))
+(def fact-reference
+  (work/start
+   fact-runtime
+   (test-work/fact-work
+    'code.test-work-test
+    "work-driven failing fact"
+    7)
+   {}
+   {:id "test-fact-1"}))
+(def fact-result
+  (work/result fact-runtime fact-reference))
+
+(def reporter (fact/event-reporter))
+(def reported-result
+  (work/run
+   (work/local-runtime)
+   (test-work/fact-work
+    'code.test-work-test
+    "work-driven failing fact"
+    7)
+   {}
+   {:context {:test/reporter reporter}}))
+
+(def results
+  [(test/check
+    "suite execution uses IWorkRuntime while retaining test-domain status"
+    [(work/status suite-runtime suite-reference)
+     (:status suite-result)
+     (get-in suite-result [:counts :passed])
+     (get-in suite-result [:counts :failed])
+     (deref execution-count)]
+    [:completed :failed 1 1 1])
+
+   (test/check
+    "idempotent suite starts replay the completed suite boundary"
+    [(work/status suite-runtime same-suite-reference)
+     (= suite-reference same-suite-reference)
+     (deref execution-count)
+     (count (work/checkpoints suite-runtime suite-reference))]
+    [:completed true 1 1])
+
+   (test/check
+    "a failed assertion is a completed fact work result"
+    [(work/status fact-runtime fact-reference)
+     (:status fact-result)
+     (count (:checks fact-result))
+     (count (work/checkpoints fact-runtime fact-reference))]
+    [:completed :failed 1 1])
+
+   (test/check
+    "test reporters are supplied as runtime context capabilities"
+    [(:status reported-result)
+     (vec (map (fn [event] (:event event))
+               (fact/reporter-events reporter)))]
+    [:failed [:fact/start :fact/end]])])
+
+(test/print-results results)
