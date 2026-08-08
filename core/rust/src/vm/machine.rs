@@ -31,7 +31,7 @@ use crate::task::promise::settle_result;
 
 #[path = "machine/globals.rs"]
 mod globals;
-
+#[cfg(feature = "bytecode-instrumentation")] #[path = "machine/instrumentation.rs"] pub mod instrumentation;
 #[cfg(feature = "bytecode-observation")]
 #[path = "machine/observation.rs"]
 pub mod observation;
