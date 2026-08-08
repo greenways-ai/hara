@@ -1,0 +1,240 @@
+(ns code.vm.halc-test
+  (:require [code.vm :as vm]
+            [code.vm.halc :as halc]
+            [std.lib.test :as test]))
+
+(def +module-source+
+  "(ns demo.schema)\n(def Customer [:map [:id :int]])\n(defn ^{:schema #'Customer} customer-id [customer]\n  (:id customer))")
+
+(def +module-result+
+  {:module/namespace "demo.schema"
+   :module/resource "demo/schema.hal"
+   :source/hash "sha256:source"
+   :schema/definitions ["demo.schema/Customer"]
+   :schema/functions ["demo.schema/customer-id"]
+   :artifact
+   {:origin :halc
+    :format/version 1
+    :format/flags 1
+    :payload/bytes 256
+    :payload/checksum "sha256:payload"}
+   :decode/parity true})
+
+(def +module-trace+
+  {:trace/schema "hal.halc-trace/v1"
+   :trace/id "halc-demo-1"
+   :trace/status :ok
+   :trace/events
+   [{:event/id 1
+     :event/sequence 1
+     :event/stage :source/read
+     :event/status :ok
+     :event/source {:form/path [0]}
+     :event/evidence {:form/count 3}}
+    {:event/id 2
+     :event/sequence 2
+     :event/stage :module/identity
+     :event/status :ok
+     :event/source {:form/path [0]}
+     :event/evidence
+     {:module/namespace "demo.schema"
+      :module/resource "demo/schema.hal"}}
+    {:event/id 3
+     :event/sequence 3
+     :event/stage :forms/canonicalize
+     :event/status :ok
+     :event/source {:form/path [2]}
+     :event/evidence
+     {:schema/reference "demo.schema/Customer"}}
+    {:event/id 4
+     :event/sequence 4
+     :event/stage :schema/index
+     :event/status :ok
+     :event/source {:form/path [1]}
+     :event/evidence
+     {:schema/definitions ["demo.schema/Customer"]
+      :schema/functions ["demo.schema/customer-id"]}}
+    {:event/id 5
+     :event/sequence 5
+     :event/stage :payload/encode
+     :event/status :ok
+     :event/evidence {:payload/bytes 256}}
+    {:event/id 6
+     :event/sequence 6
+     :event/stage :envelope/build
+     :event/status :ok
+     :event/evidence
+     {:format/magic "HALC"
+      :format/version 1
+      :format/flags 1}}
+    {:event/id 7
+     :event/sequence 7
+     :event/stage :artifact/validate
+     :event/status :ok
+     :event/evidence {:payload/checksum "sha256:payload"}}
+    {:event/id 8
+     :event/sequence 8
+     :event/stage :artifact/decode
+     :event/status :ok
+     :event/evidence {:decode/parity true}}]
+   :trace/result +module-result+})
+
+(def +invalid-artifact-trace+
+  {:trace/schema "hal.halc-trace/v1"
+   :trace/id "halc-invalid-1"
+   :trace/status :error
+   :trace/events
+   [{:event/id 1
+     :event/sequence 1
+     :event/stage :artifact/validate
+     :event/status :error
+     :event/evidence {:format/magic "NOPE"}
+     :event/error "bad magic"}]
+   :trace/error "bad magic"})
+
+(def results
+  [(test/check
+    "HALC trace documents declare supported production stages"
+    [(halc/trace? +module-trace+)
+     (halc/trace? +invalid-artifact-trace+)
+     (has? vm/halc-stages :schema/index)
+     (has? vm/halc-stages :artifact/decode)]
+    [true true true true])
+
+   (test/check
+    "one HALC step consumes one stage event with source evidence"
+    (let [machine (halc/create +module-source+ +module-trace+)
+          next (halc/step machine)
+          transition (first (vm/trace next))]
+      [(:vm/kind next)
+       (:vm/status next)
+       (:vm/step next)
+       (get-in next [:vm/state :event/index])
+       (:step/stage transition)
+       (:step/rule transition)
+       (get-in transition [:step/source :form/path])
+       (get-in transition [:step/source :form/source])])
+    [:halc
+     :running
+     1
+     1
+     :source/read
+     :source/read
+     [0]
+     "(ns demo.schema)"])
+
+   (test/check
+    "HALC replay preserves ordered compiler stages and terminal artifact result"
+    (let [machine
+          (vm/halc-from-trace
+           +module-source+
+           +module-trace+
+           {:source {:id "demo/schema.hal"
+                     :version 2}})
+          transitions (vm/trace machine)]
+      [(:vm/status machine)
+       (:vm/step machine)
+       (vec (map (fn [transition]
+                   (:step/stage transition))
+                 transitions))
+       (get-in machine [:vm/result :module/namespace])
+       (get-in machine [:vm/result :artifact :origin])
+       (get-in machine [:vm/result :decode/parity])
+       (get-in (vm/halc-source-index machine) [:source/id])
+       (get-in (vm/halc-source-index machine) [:source/version])])
+    [:returned
+     9
+     [:source/read
+      :module/identity
+      :forms/canonicalize
+      :schema/index
+      :payload/encode
+      :envelope/build
+      :artifact/validate
+      :artifact/decode
+      :artifact/complete]
+     "demo.schema"
+     :halc
+     true
+     "demo/schema.hal"
+     2])
+
+   (test/check
+    "schema stages retain exact source forms for Hodos projections"
+    (let [machine (halc/from-trace +module-source+ +module-trace+)
+          schema-transitions
+          (filter
+           (fn [transition]
+             (or (= :forms/canonicalize (:step/stage transition))
+                 (= :schema/index (:step/stage transition))))
+           (vm/trace machine))]
+      (vec
+       (map
+        (fn [transition]
+          [(get-in transition [:step/source :form/path])
+           (get-in transition [:step/source :form/source])])
+        schema-transitions)))
+    [[[2]
+      "(defn ^{:schema #'Customer} customer-id [customer]\n  (:id customer))"]
+     [[1]
+      "(def Customer [:map [:id :int]])"]])
+
+   (test/check
+    "invalid artifacts fail at their precise HALC stage"
+    (let [machine
+          (halc/from-trace
+           "(ns demo.invalid)"
+           +invalid-artifact-trace+)
+          transition (last (vm/trace machine))]
+      [(:vm/status machine)
+       (:vm/step machine)
+       (:vm/error machine)
+       (:step/stage transition)
+       (:step/rule transition)
+       (get-in machine [:vm/state :diagnostics])])
+    [:failed
+     1
+     "bad magic"
+     :artifact/validate
+     :artifact/validate
+     [{:stage :artifact/validate
+       :message "bad magic"}]])
+
+   (test/check
+    "bounded HALC replay suspends and resumes at the next compiler stage"
+    (let [machine (halc/create +module-source+ +module-trace+)
+          suspended (halc/run machine {:steps 3})
+          resumed (halc/run suspended {:steps 20})]
+      [(:vm/status suspended)
+       (:vm/step suspended)
+       (get-in suspended [:vm/state :event/index])
+       (:step/rule (last (vm/trace suspended)))
+       (:vm/status resumed)
+       (get-in resumed [:vm/result :decode/parity])])
+    [:suspended 4 3 :run/step-limit :returned true])
+
+   (test/check
+    "unknown stages and unresolved source references fail before replay"
+    [(try
+       (do
+         (halc/create
+          +module-source+
+          (assoc-in +module-trace+
+                    [:trace/events 0 :event/stage]
+                    :unknown/stage))
+         false)
+       (catch Throwable error
+         true))
+     (try
+       (do
+         (halc/create
+          +module-source+
+          (assoc-in +module-trace+
+                    [:trace/events 0 :event/source]
+                    {:form/path [99]}))
+         false)
+       (catch Throwable error
+         true))]
+    [true true])])
+
+(test/print-results results)

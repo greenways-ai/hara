@@ -1,0 +1,344 @@
+(ns code.vm.halc
+  (:require [code.vm.model :as model]
+            [code.vm.source :as source]))
+
+(def +trace-schema+
+  "hal.halc-trace/v1")
+
+(def +trace-statuses+
+  #{:ok :error})
+
+(def +event-statuses+
+  #{:ok :error})
+
+(def +stages+
+  #{:source/read
+    :module/identity
+    :forms/canonicalize
+    :schema/index
+    :payload/encode
+    :envelope/build
+    :artifact/validate
+    :artifact/decode
+    :handoff/bytecode})
+
+(defn- invalid
+  [message data]
+  (throw (ex-info message data)))
+
+(defn- map-value
+  [label value]
+  (if (map? value)
+    value
+    (invalid
+     (str "code.vm.halc " label " must be a map")
+     {:field label
+      :value value})))
+
+(defn- vector-value
+  [label value]
+  (if (vector? value)
+    value
+    (invalid
+     (str "code.vm.halc " label " must be a vector")
+     {:field label
+      :value value})))
+
+(defn- non-empty-string
+  [label value]
+  (if (and (string? value)
+           (> (count value) 0))
+    value
+    (invalid
+     (str "code.vm.halc " label " must be a non-empty string")
+     {:field label
+      :value value})))
+
+(defn- positive-integer
+  [label value]
+  (if (and (integer? value)
+           (> value 0))
+    value
+    (invalid
+     (str "code.vm.halc " label " must be a positive integer")
+     {:field label
+      :value value})))
+
+(defn- member
+  [label allowed value]
+  (if (has? allowed value)
+    value
+    (invalid
+     (str "Unsupported code.vm.halc " label ": " value)
+     {:field label
+      :value value
+      :allowed allowed})))
+
+(defn event?
+  [value]
+  (and (map? value)
+       (integer? (:event/id value))
+       (>= (:event/id value) 0)
+       (integer? (:event/sequence value))
+       (>= (:event/sequence value) 0)
+       (has? +stages+ (:event/stage value))
+       (has? +event-statuses+ (:event/status value))
+       (or (nil? (:event/source value))
+           (map? (:event/source value)))
+       (or (nil? (:event/evidence value))
+           (map? (:event/evidence value)))
+       (or (nil? (:event/error value))
+           (string? (:event/error value)))))
+
+(defn trace?
+  [value]
+  (and (map? value)
+       (= +trace-schema+ (:trace/schema value))
+       (string? (:trace/id value))
+       (> (count (:trace/id value)) 0)
+       (has? +trace-statuses+ (:trace/status value))
+       (vector? (:trace/events value))
+       (every? event? (:trace/events value))
+       (or (nil? (:trace/result value))
+           (map? (:trace/result value)))
+       (or (nil? (:trace/error value))
+           (string? (:trace/error value)))))
+
+(defn normalize-trace
+  [value]
+  (let [trace (map-value "trace" value)
+        schema (:trace/schema trace)
+        id (:trace/id trace)
+        status (:trace/status trace)
+        events (vector-value "trace events" (:trace/events trace))]
+    (if (not= +trace-schema+ schema)
+      (invalid
+       "Unsupported code.vm.halc trace schema"
+       {:schema schema
+        :expected +trace-schema+})
+      nil)
+    (non-empty-string "trace id" id)
+    (member "trace status" +trace-statuses+ status)
+    (reduce
+     (fn [_ event]
+       (if (event? event)
+         nil
+         (invalid
+          "Invalid code.vm.halc trace event"
+          {:event event})))
+     nil
+     events)
+    (if (and (:trace/result trace)
+             (not (map? (:trace/result trace))))
+      (invalid
+       "Invalid code.vm.halc trace result"
+       {:result (:trace/result trace)})
+      nil)
+    (if (and (:trace/error trace)
+             (not (string? (:trace/error trace))))
+      (invalid
+       "Invalid code.vm.halc trace error"
+       {:error (:trace/error trace)})
+      nil)
+    trace))
+
+(defn halc-machine?
+  [value]
+  (and (model/machine? value)
+       (= :halc (:vm/kind value))
+       (trace? (get-in value [:vm/options :trace]))
+       (source/source? (get-in value [:vm/options :source/index]))))
+
+(defn trace-document
+  [machine]
+  (if (halc-machine? machine)
+    (get-in machine [:vm/options :trace])
+    (invalid
+     "code.vm.halc requires a HALC machine"
+     {:value machine})))
+
+(defn source-index
+  [machine]
+  (if (halc-machine? machine)
+    (get-in machine [:vm/options :source/index])
+    (invalid
+     "code.vm.halc requires a HALC machine"
+     {:value machine})))
+
+(defn- validate-event-sources
+  [source-index trace]
+  (reduce
+   (fn [_ event]
+     (let [reference (:event/source event)]
+       (if reference
+         (if (source/resolve source-index reference)
+           nil
+           (invalid
+            "code.vm.halc event source does not resolve"
+            {:event event
+             :reference reference}))
+         nil)))
+   nil
+   (:trace/events trace))
+  trace)
+
+(defn- initial-state
+  [trace]
+  {:trace/schema (:trace/schema trace)
+   :trace/id (:trace/id trace)
+   :trace/status (:trace/status trace)
+   :event/index 0
+   :event/count (count (:trace/events trace))
+   :event/current nil
+   :stage nil
+   :source/current nil
+   :evidence/current nil
+   :diagnostics []
+   :result nil
+   :error nil})
+
+(defn create
+  ([input trace]
+   (create input trace {}))
+  ([input trace options]
+   (let [options (map-value "options" (or options {}))
+         normalized-trace (normalize-trace trace)
+         source-options
+         (map-value "source options" (or (:source options) {}))
+         source-index (source/index input source-options)
+         validated-trace
+         (validate-event-sources source-index normalized-trace)
+         adapter-options
+         (merge
+          (map-value "adapter options" (or (:options options) {}))
+          {:trace validated-trace
+           :source/index source-index})]
+     (model/machine
+      :halc
+      input
+      {:id (or (:id options)
+               (str "vm/halc/" (:trace/id validated-trace)))
+       :state (initial-state validated-trace)
+       :options adapter-options
+       :limits (:limits options)}))))
+
+(defn- resolved-event-source
+  [machine event]
+  (or
+   (source/resolve (source-index machine) (:event/source event))
+   (if (= :source/read (:event/stage event))
+     (source/entry-form (source-index machine))
+     nil)))
+
+(defn- transition-source
+  [trace event form]
+  (merge
+   {:trace/id (:trace/id trace)
+    :event/id (:event/id event)
+    :event/sequence (:event/sequence event)}
+   (or form {})))
+
+(defn- event-state
+  [machine event form]
+  (let [state (:vm/state machine)
+        diagnostics
+        (if (= :error (:event/status event))
+          (conj (:diagnostics state)
+                {:stage (:event/stage event)
+                 :message (:event/error event)})
+          (:diagnostics state))]
+    (assoc state
+           :event/index (inc (:event/index state))
+           :event/current event
+           :stage (:event/stage event)
+           :source/current form
+           :evidence/current (:event/evidence event)
+           :diagnostics diagnostics
+           :error (:event/error event))))
+
+(defn- event-transition
+  [machine trace event]
+  (let [failed (= :error (:event/status event))
+        form (resolved-event-source machine event)]
+    (model/transition
+     machine
+     (:event/stage event)
+     (or (:event/rule event) (:event/stage event))
+     (event-state machine event form)
+     {:source (transition-source trace event form)
+      :events [event]
+      :status (if failed :failed :running)
+      :error (if failed (:event/error event) nil)})))
+
+(defn- final-transition
+  [machine trace]
+  (let [failed (= :error (:trace/status trace))
+        result (:trace/result trace)
+        error (:trace/error trace)
+        state (assoc (:vm/state machine)
+                     :trace/status (:trace/status trace)
+                     :event/current nil
+                     :result result
+                     :error error)]
+    (model/transition
+     machine
+     :artifact/complete
+     (if failed :halc/failed :halc/complete)
+     state
+     {:source {:trace/id (:trace/id trace)
+               :event/sequence (count (:trace/events trace))}
+      :status (if failed :failed :returned)
+      :result (if failed nil result)
+      :error (if failed error nil)})))
+
+(defn step
+  [machine]
+  (if (model/terminal? machine)
+    machine
+    (let [trace (trace-document machine)
+          index (get-in machine [:vm/state :event/index])
+          event (get (:trace/events trace) index)]
+      (if event
+        (model/advance machine (event-transition machine trace event))
+        (model/advance machine (final-transition machine trace))))))
+
+(defn- suspend-at-limit
+  [machine]
+  (if (or (model/terminal? machine)
+          (= :suspended (:vm/status machine)))
+    machine
+    (model/advance
+     machine
+     (model/transition
+      machine
+      :control
+      :run/step-limit
+      (assoc (:vm/state machine)
+             :suspension/reason :step-limit)
+      {:status :suspended}))))
+
+(defn run
+  ([machine]
+   (run machine {}))
+  ([machine options]
+   (let [options (map-value "run options" (or options {}))
+         limit
+         (positive-integer
+          "run step limit"
+          (or (:steps options)
+              (get-in machine [:vm/limits :steps])))]
+     (loop [current machine
+            remaining limit]
+       (if (model/terminal? current)
+         current
+         (if (= remaining 0)
+           (suspend-at-limit current)
+           (recur (step current) (dec remaining))))))))
+
+(defn from-trace
+  ([input trace]
+   (from-trace input trace {}))
+  ([input trace options]
+   (let [options (map-value "options" (or options {}))]
+     (run (create input trace options)
+          (or (:run options) {})))))
