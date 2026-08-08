@@ -1,0 +1,345 @@
+(ns code.vm.interpreter
+  (:require [code.vm.model :as model]))
+
+(def +journal-schema+
+  "hal.evaluation-journal/v1")
+
+(def +journal-statuses+
+  #{:ok :error :truncated})
+
+(def +event-kinds+
+  #{:evaluation/start
+    :macro/expand
+    :operation/enter
+    :operation/return
+    :evaluation/error
+    :journal/truncated})
+
+(defn- invalid
+  [message data]
+  (throw (ex-info message data)))
+
+(defn- map-value
+  [label value]
+  (if (map? value)
+    value
+    (invalid
+     (str "code.vm.interpreter " label " must be a map")
+     {:field label
+      :value value})))
+
+(defn- vector-value
+  [label value]
+  (if (vector? value)
+    value
+    (invalid
+     (str "code.vm.interpreter " label " must be a vector")
+     {:field label
+      :value value})))
+
+(defn- non-empty-string
+  [label value]
+  (if (and (string? value)
+           (> (count value) 0))
+    value
+    (invalid
+     (str "code.vm.interpreter " label " must be a non-empty string")
+     {:field label
+      :value value})))
+
+(defn- non-negative-integer
+  [label value]
+  (if (and (integer? value)
+           (>= value 0))
+    value
+    (invalid
+     (str "code.vm.interpreter " label " must be a non-negative integer")
+     {:field label
+      :value value})))
+
+(defn- positive-integer
+  [label value]
+  (if (and (integer? value)
+           (> value 0))
+    value
+    (invalid
+     (str "code.vm.interpreter " label " must be a positive integer")
+     {:field label
+      :value value})))
+
+(defn- member
+  [label allowed value]
+  (if (contains? allowed value)
+    value
+    (invalid
+     (str "Unsupported code.vm.interpreter " label ": " value)
+     {:field label
+      :value value
+      :allowed allowed})))
+
+(defn preview?
+  [value]
+  (and (map? value)
+       (string? (:value/type value))
+       (string? (:value/display value))
+       (or (= true (:value/truncated value))
+           (= false (:value/truncated value)))))
+
+(defn event?
+  [value]
+  (and (map? value)
+       (integer? (:event/id value))
+       (>= (:event/id value) 0)
+       (integer? (:event/sequence value))
+       (>= (:event/sequence value) 0)
+       (contains? +event-kinds+ (:event/kind value))))
+
+(defn journal?
+  [value]
+  (and (map? value)
+       (= +journal-schema+ (:journal/schema value))
+       (string? (:journal/id value))
+       (> (count (:journal/id value)) 0)
+       (contains? +journal-statuses+ (:journal/status value))
+       (vector? (:journal/events value))
+       (every? event? (:journal/events value))
+       (or (nil? (:journal/result value))
+           (preview? (:journal/result value)))
+       (or (nil? (:journal/error value))
+           (string? (:journal/error value)))))
+
+(defn normalize-journal
+  [value]
+  (let [journal (map-value "journal" value)
+        schema (:journal/schema journal)
+        id (:journal/id journal)
+        status (:journal/status journal)
+        events (vector-value "journal events"
+                             (:journal/events journal))]
+    (if (not= +journal-schema+ schema)
+      (invalid
+       "Unsupported code.vm.interpreter journal schema"
+       {:schema schema
+        :expected +journal-schema+})
+      nil)
+    (non-empty-string "journal id" id)
+    (member "journal status" +journal-statuses+ status)
+    (reduce
+     (fn [_ event]
+       (if (event? event)
+         nil
+         (invalid
+          "Invalid code.vm.interpreter journal event"
+          {:event event})))
+     nil
+     events)
+    (if (and (:journal/result journal)
+             (not (preview? (:journal/result journal))))
+      (invalid
+       "Invalid code.vm.interpreter journal result"
+       {:result (:journal/result journal)})
+      nil)
+    (if (and (:journal/error journal)
+             (not (string? (:journal/error journal))))
+      (invalid
+       "Invalid code.vm.interpreter journal error"
+       {:error (:journal/error journal)})
+      nil)
+    journal))
+
+(defn interpreter-machine?
+  [value]
+  (and (model/machine? value)
+       (= :interpreter (:vm/kind value))
+       (journal? (get-in value [:vm/options :journal]))))
+
+(defn journal
+  [machine]
+  (if (interpreter-machine? machine)
+    (get-in machine [:vm/options :journal])
+    (invalid
+     "code.vm.interpreter requires an interpreter machine"
+     {:value machine})))
+
+(defn- initial-state
+  [journal options]
+  {:journal/schema (:journal/schema journal)
+   :journal/id (:journal/id journal)
+   :journal/status (:journal/status journal)
+   :event/index 0
+   :event/count (count (:journal/events journal))
+   :event/kind nil
+   :event/current nil
+   :operation/current nil
+   :macro/current nil
+   :namespace (non-empty-string
+               "namespace"
+               (or (:namespace options) "user"))
+   :result nil
+   :error nil
+   :truncated (= :truncated (:journal/status journal))})
+
+(defn create
+  ([input journal]
+   (create input journal {}))
+  ([input journal options]
+   (let [options (map-value "options" (or options {}))
+         journal (normalize-journal journal)
+         adapter-options
+         (merge
+          (map-value "adapter options"
+                     (or (:options options) {}))
+          {:journal journal})]
+     (model/machine
+      :interpreter
+      input
+      {:id (or (:id options)
+               (str "vm/interpreter/" (:journal/id journal)))
+       :state (initial-state journal options)
+       :options adapter-options
+       :limits (:limits options)}))))
+
+(defn- event-source
+  [journal event]
+  {:journal/id (:journal/id journal)
+   :event/id (:event/id event)
+   :event/sequence (:event/sequence event)
+   :event/source (:event/source event)})
+
+(defn- event-stage-rule
+  [event]
+  (case (:event/kind event)
+    :evaluation/start [:evaluate :evaluation/start]
+    :macro/expand [:expand :macro/expand]
+    :operation/enter [:call :operation/enter]
+    :operation/return [:return :operation/return]
+    :evaluation/error [:error :evaluation/error]
+    :journal/truncated [:trace :journal/truncated]))
+
+(defn- event-state
+  [machine event]
+  (let [state (:vm/state machine)
+        kind (:event/kind event)
+        base (assoc state
+                    :event/index (inc (:event/index state))
+                    :event/kind kind
+                    :event/current event)]
+    (case kind
+      :evaluation/start
+      (assoc base
+             :result nil
+             :error nil)
+
+      :macro/expand
+      (assoc base
+             :macro/current event)
+
+      :operation/enter
+      (assoc base
+             :operation/current event)
+
+      :operation/return
+      (assoc base
+             :operation/current event)
+
+      :evaluation/error
+      (assoc base
+             :error (:error/message event))
+
+      :journal/truncated
+      (assoc base
+             :truncated true
+             :truncation/reason (:truncation/reason event)))))
+
+(defn- event-transition
+  [machine journal event]
+  (let [[stage rule] (event-stage-rule event)
+        failed (= :evaluation/error (:event/kind event))]
+    (model/transition
+     machine
+     stage
+     rule
+     (event-state machine event)
+     {:source (event-source journal event)
+      :events [event]
+      :status (if failed :failed :running)
+      :error (if failed (:error/message event) nil)})))
+
+(defn- final-transition
+  [machine journal]
+  (let [failed (= :error (:journal/status journal))
+        result (:journal/result journal)
+        error (:journal/error journal)
+        state (assoc (:vm/state machine)
+                     :journal/status (:journal/status journal)
+                     :event/current nil
+                     :result result
+                     :error error
+                     :truncated (= :truncated
+                                   (:journal/status journal)))]
+    (model/transition
+     machine
+     :evaluate
+     (if failed :evaluation/failed :evaluation/complete)
+     state
+     {:source {:journal/id (:journal/id journal)
+               :event/sequence (count (:journal/events journal))}
+      :status (if failed :failed :returned)
+      :result (if failed nil result)
+      :error (if failed error nil)})))
+
+(defn step
+  [machine]
+  (if (model/terminal? machine)
+    machine
+    (let [journal (journal machine)
+          index (get-in machine [:vm/state :event/index])
+          event (get (:journal/events journal) index)]
+      (if event
+        (model/advance
+         machine
+         (event-transition machine journal event))
+        (model/advance
+         machine
+         (final-transition machine journal))))))
+
+(defn- suspend-at-limit
+  [machine]
+  (if (or (model/terminal? machine)
+          (= :suspended (:vm/status machine)))
+    machine
+    (model/advance
+     machine
+     (model/transition
+      machine
+      :control
+      :run/step-limit
+      (assoc (:vm/state machine)
+             :suspension/reason :step-limit)
+      {:status :suspended}))))
+
+(defn run
+  ([machine]
+   (run machine {}))
+  ([machine options]
+   (let [options (map-value "run options" (or options {}))
+         limit (positive-integer
+                "run step limit"
+                (or (:steps options)
+                    (get-in machine [:vm/limits :steps])))]
+     (loop [current machine
+            remaining limit]
+       (if (model/terminal? current)
+         current
+         (if (= remaining 0)
+           (suspend-at-limit current)
+           (recur (step current)
+                  (dec remaining))))))))
+
+(defn from-journal
+  ([input journal]
+   (from-journal input journal {}))
+  ([input journal options]
+   (let [options (map-value "options" (or options {}))]
+     (run (create input journal options)
+          (or (:run options) {})))))

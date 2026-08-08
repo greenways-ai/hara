@@ -1,0 +1,210 @@
+(ns code.vm.interpreter-test
+  (:require [code.vm :as vm]
+            [code.vm.interpreter :as interpreter]
+            [std.lib.test :as test]))
+
+(defn value-preview
+  [type display]
+  {:value/type type
+   :value/display display
+   :value/truncated false})
+
+(def +nested-journal+
+  {:journal/schema "hal.evaluation-journal/v1"
+   :journal/id "journal-17"
+   :journal/status :ok
+   :journal/events
+   [{:event/id 1
+     :event/sequence 1
+     :event/kind :evaluation/start}
+    {:event/id 2
+     :event/sequence 2
+     :event/kind :operation/enter
+     :operation/id 1
+     :operation/parent nil
+     :operation/depth 0
+     :operation/name "std.foundation/*"
+     :operation/arguments
+     [(value-preview "integer" "2")
+      (value-preview "integer" "3")]}
+    {:event/id 3
+     :event/sequence 3
+     :event/kind :operation/return
+     :operation/id 1
+     :operation/parent nil
+     :operation/depth 0
+     :operation/name nil
+     :operation/result (value-preview "integer" "6")}
+    {:event/id 4
+     :event/sequence 4
+     :event/kind :operation/enter
+     :operation/id 2
+     :operation/parent nil
+     :operation/depth 0
+     :operation/name "std.foundation/+"
+     :operation/arguments
+     [(value-preview "integer" "1")
+      (value-preview "integer" "6")]}
+    {:event/id 5
+     :event/sequence 5
+     :event/kind :operation/return
+     :operation/id 2
+     :operation/parent nil
+     :operation/depth 0
+     :operation/name nil
+     :operation/result (value-preview "integer" "7")}]
+   :journal/result (value-preview "integer" "7")})
+
+(def +error-journal+
+  {:journal/schema "hal.evaluation-journal/v1"
+   :journal/id "journal-error"
+   :journal/status :error
+   :journal/events
+   [{:event/id 1
+     :event/sequence 1
+     :event/kind :evaluation/start}
+    {:event/id 2
+     :event/sequence 2
+     :event/kind :operation/enter
+     :operation/id 1
+     :operation/parent nil
+     :operation/depth 0
+     :operation/name "std.foundation//"
+     :operation/arguments
+     [(value-preview "integer" "1")
+      (value-preview "integer" "0")]}
+    {:event/id 3
+     :event/sequence 3
+     :event/kind :evaluation/error
+     :error/message "division by zero"}]
+   :journal/error "division by zero"})
+
+(def +truncated-journal+
+  {:journal/schema "hal.evaluation-journal/v1"
+   :journal/id "journal-truncated"
+   :journal/status :truncated
+   :journal/events
+   [{:event/id 1
+     :event/sequence 1
+     :event/kind :evaluation/start}
+    {:event/id 2
+     :event/sequence 2
+     :event/kind :journal/truncated
+     :truncation/reason "journal limit reached; evaluation continued"}]
+   :journal/result (value-preview "integer" "42")})
+
+(def results
+  [(test/check
+    "portable evaluation journals are accepted explicitly"
+    [(interpreter/journal? +nested-journal+)
+     (interpreter/journal? +error-journal+)
+     (interpreter/journal? +truncated-journal+)]
+    [true true true])
+
+   (test/check
+    "one interpreter step consumes one real journal event"
+    (let [machine
+          (interpreter/create
+           '(+ 1 (* 2 3))
+           +nested-journal+)
+          next (interpreter/step machine)
+          transition (first (vm/trace next))]
+      [(:vm/status next)
+       (:vm/step next)
+       (get-in next [:vm/state :event/index])
+       (:step/rule transition)
+       (get-in transition [:step/source :event/sequence])])
+    [:running 1 1 :evaluation/start 1])
+
+   (test/check
+    "journal replay preserves nested-result order and returns the journal result"
+    (let [machine
+          (vm/interpreter-from-journal
+           '(+ 1 (* 2 3))
+           +nested-journal+)
+          trace (vm/trace machine)
+          returns
+          (filter
+           (fn [transition]
+             (= :operation/return (:step/rule transition)))
+           trace)]
+      [(:vm/status machine)
+       (:vm/step machine)
+       (get-in machine [:vm/result :value/display])
+       (vec (map (fn [transition]
+                   (:step/rule transition))
+                 trace))
+       (vec (map (fn [transition]
+                   (get-in transition
+                           [:step/events 0
+                            :operation/result
+                            :value/display]))
+                 returns))])
+    [:returned
+     6
+     "7"
+     [:evaluation/start
+      :operation/enter
+      :operation/return
+      :operation/enter
+      :operation/return
+      :evaluation/complete]
+     ["6" "7"]])
+
+   (test/check
+    "runtime journal failures become terminal VM failures"
+    (let [machine
+          (interpreter/from-journal
+           '(/ 1 0)
+           +error-journal+)
+          transition (last (vm/trace machine))]
+      [(:vm/status machine)
+       (:vm/step machine)
+       (:vm/error machine)
+       (:step/rule transition)
+       (get-in machine [:vm/state :event/index])])
+    [:failed 3 "division by zero" :evaluation/error 3])
+
+   (test/check
+    "journal truncation is explicit without discarding the final value"
+    (let [machine
+          (interpreter/from-journal
+           '(def journal-value 42)
+           +truncated-journal+)]
+      [(:vm/status machine)
+       (:vm/step machine)
+       (get-in machine [:vm/state :truncated])
+       (get-in machine [:vm/result :value/display])
+       (:step/rule (last (vm/trace machine)))])
+    [:returned 3 true "42" :evaluation/complete])
+
+   (test/check
+    "bounded replay suspends and can resume from the next journal event"
+    (let [machine
+          (interpreter/create
+           '(+ 1 (* 2 3))
+           +nested-journal+)
+          suspended (interpreter/run machine {:steps 2})
+          resumed (interpreter/run suspended {:steps 10})]
+      [(:vm/status suspended)
+       (:vm/step suspended)
+       (get-in suspended [:vm/state :event/index])
+       (:step/rule (last (vm/trace suspended)))
+       (:vm/status resumed)
+       (get-in resumed [:vm/result :value/display])])
+    [:suspended 3 2 :run/step-limit :returned "7"])
+
+   (test/check
+    "unknown journal schemas fail before machine construction"
+    (try
+      (do
+        (interpreter/create
+         '(+ 1 2)
+         (assoc +nested-journal+
+                :journal/schema "unknown/journal"))
+        false)
+      (catch Throwable error
+        true))
+    true)])
+
+(test/print-results results)
