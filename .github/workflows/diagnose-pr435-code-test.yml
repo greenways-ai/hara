@@ -16,14 +16,12 @@ jobs:
       fail-fast: false
       matrix:
         phase:
-          - namespace
-          - register
-          - selected
-          - work-spec
-          - work-run
-          - public-run
-          - positional
-          - cancelled
+          - runtime
+          - public-start
+          - protocol-start
+          - lifecycle-start
+          - public-status
+          - protocol-status
     steps:
       - uses: actions/checkout@v4
       - name: Checkout hara-specs-registry
@@ -51,15 +49,14 @@ jobs:
           end = text.index(end_marker, start)
           setup = '''(ns code.test-rust-probe (:use code.test))
           (fact "simple" (+ 1 1) => 2)'''
+          run_input = '{:namespace "code.test-rust-probe"}'
           sources = {
-              "namespace": '(ns code.test-rust-probe (:use code.test)) :loaded',
-              "register": setup + ' :registered',
-              "selected": setup + ' (:status (run-selected nil {:namespace "code.test-rust-probe"}))',
-              "work-spec": setup + ' (:op (std.work/work-spec (suite-work)))',
-              "work-run": setup + ' (:status (std.work/run (std.work/local-runtime) (suite-work) {:namespace "code.test-rust-probe"} {}))',
-              "public-run": setup + ' (:status (run {:namespace "code.test-rust-probe"}))',
-              "positional": setup + " (:facts (run '[code]))",
-              "cancelled": setup + ' (:cancelled (:counts (run {:namespace "code.test-rust-probe" :control (function-control (fn [fact] true))})))',
+              "runtime": setup + ' (let [runtime (std.work/local-runtime)] :runtime)',
+              "public-start": setup + f' (let [runtime (std.work/local-runtime) reference (std.work/start runtime (suite-work) {run_input} {{}})] :started)',
+              "protocol-start": setup + f' (let [runtime (std.work/local-runtime) reference (std.work.protocol/-start runtime (suite-work) {run_input} {{}})] :started)',
+              "lifecycle-start": setup + f' (let [runtime (std.work/local-runtime) reference (std.work.runtime.lifecycle/start-run runtime (suite-work) {run_input} {{}})] :started)',
+              "public-status": setup + f' (let [runtime (std.work/local-runtime) reference (std.work/start runtime (suite-work) {run_input} {{}})] (std.work/status runtime reference))',
+              "protocol-status": setup + f' (let [runtime (std.work/local-runtime) reference (std.work.protocol/-start runtime (suite-work) {run_input} {{}})] (std.work.protocol/-query runtime reference {{:query :status}}))',
           }
           phase = os.environ["PHASE"]
           source = sources[phase]
