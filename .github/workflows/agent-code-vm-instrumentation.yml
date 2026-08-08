@@ -22,6 +22,8 @@ jobs:
           repository: hara-lang/hara-specs-registry
           path: hara-specs-registry
           fetch-depth: 1
+      - name: Expose specs registry at the runtime fixture path
+        run: ln -sfn "$GITHUB_WORKSPACE/hara-specs-registry" "$GITHUB_WORKSPACE/../hara-specs-registry"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
