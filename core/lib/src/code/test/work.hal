@@ -3,7 +3,41 @@
 ;; std.work owns execution, lifecycle, replay, and checkpoints.
 (ns code.test.work
   (:require [code.test :as test]
+            [code.test.protocol :as protocol]
             [std.work :as work]))
+
+(defstruct WorkReporter [context reporter])
+
+(defn work-event-kind
+  [event]
+  (cond
+    (= event :run/start) :test/run-started
+    (= event :run/end) :test/run-completed
+    (= event :fact/start) :test/fact-started
+    (= event :fact/end) :test/fact-completed
+    :else :test/event))
+
+(extend-type WorkReporter protocol/ITestReporter
+  (report-event [reporter event]
+    (let [context (field reporter :context)
+          delegate (field reporter :reporter)
+          event-kind (work-event-kind (:event event))
+          data (assoc (dissoc event :event)
+                      :test/event (:event event))]
+      (work/emit! context event-kind data)
+      (if delegate
+        (try
+          (test/report! delegate event)
+          (catch Throwable error event))
+        event))))
+
+(defn work-reporter
+  [context reporter]
+  (code.test.work/WorkReporter context reporter))
+
+(defn reporter-for
+  [options context]
+  (work-reporter context (:reporter options)))
 
 (def +default-revision+ test/+default-work-revision+)
 (def +runner-work+ test/+runner-work+)
@@ -12,15 +46,7 @@
 (def execution-options test/work-execution-options)
 (def suite-work test/suite-work)
 
-(def +unsupported-batch-options+
-  [:before-all
-   :after-all
-   :before-each
-   :after-each
-   :fail-fast
-   :reporter
-   :control
-   :cancelled])
+(def +unsupported-batch-options+ [:fail-fast])
 
 (defn fact-identity
   [value]
@@ -84,8 +110,7 @@
      :test/revision fact-revision}
     (fn [input context]
       (let [options (execution-options input context)
-            reporter (or (:reporter options)
-                         test/+null-reporter+)]
+            reporter (reporter-for options context)]
         (test/run-fact
          (resolve-fact namespace name)
          reporter
@@ -109,7 +134,7 @@
     (if (seq unsupported)
       (throw
        (ex-info
-        "Fact batch execution does not support suite lifecycle, fail-fast, reporters, or test cancellation"
+        "Fact batch execution does not support fail-fast scheduling"
         {:unsupported unsupported
          :options options})))
     options))
@@ -128,18 +153,15 @@
   (merge (test/normalize-run-options input)
          (or (:test/options context) {})))
 
-(defn assert-global-batch-options!
-  [facts]
-  (reduce
-   (fn [_ fact]
-     (let [options
-           (or (get (deref test/+global-settings+)
-                    (:namespace fact))
-               {})]
-       (assert-batch-options! options)))
-   nil
-   facts)
-  facts)
+(defn effective-suite-options
+  [facts options]
+  (let [namespace (if (seq facts)
+                    (:namespace (first facts))
+                    nil)
+        suite-options
+        (or (get (deref test/+global-settings+) namespace)
+            {})]
+    (merge suite-options options)))
 
 (defn fact-item
   [fact options default-revision]
@@ -153,18 +175,25 @@
       :test/definition definition-token
       :test/options options}}))
 
+(defn prepare-fact-batch
+  [input context default-revision]
+  (let [input-options (data-options input context)
+        facts (selected-facts input-options)
+        options (assert-batch-options!
+                 (effective-suite-options facts input-options))
+        items
+        (vec
+         (map
+          (fn [fact]
+            (fact-item fact options default-revision))
+          facts))]
+    {:test/options options
+     :test/items items}))
+
 (defn fact-manifest
   [input context default-revision]
-  (let [options (data-options input context)
-        effective-options (execution-options options context)
-        validated-options (assert-batch-options! effective-options)
-        facts (selected-facts validated-options)
-        validated-facts (assert-global-batch-options! facts)]
-    (vec
-     (map
-      (fn [fact]
-        (fact-item fact options default-revision))
-      validated-facts))))
+  (:test/items
+   (prepare-fact-batch input context default-revision)))
 
 (defn summary-from-results
   [results]
@@ -194,61 +223,290 @@
      :timeout (:timeout counts)
      :results results}))
 
-(defn process-fact-item
+(defn fact-options
   [subject context]
-  (let [options
-        (execution-options (:test/options subject) context)
-        validated-options (assert-batch-options! options)]
-    (test/run-fact
-     (resolve-fact (:namespace subject)
-                   (:name subject))
-     test/+null-reporter+
-     validated-options)))
+  (execution-options (:test/options subject) context))
+
+(defn fact-result-identity
+  [fact]
+  {:namespace (:namespace fact)
+   :name (:name fact)
+   :meta (:meta fact)})
+
+(defn error-result
+  [fact error]
+  (merge (fact-result-identity fact)
+         {:status :error
+          :checks []
+          :error (str error)}))
+
+(defn fact-mode
+  [subject context]
+  (let [fact (resolve-fact (:namespace subject)
+                           (:name subject))
+        options (fact-options subject context)]
+    (if (:skip (:meta fact))
+      :terminal
+      (if (test/fact-cancelled? fact options)
+        :terminal
+        :run))))
+
+(defn terminal-fact-result
+  [subject context]
+  (let [fact (resolve-fact (:namespace subject)
+                           (:name subject))
+        options (fact-options subject context)
+        reporter (reporter-for options context)]
+    (test/run-fact fact reporter options)))
+
+(defn before-fact
+  [subject context]
+  (let [fact (resolve-fact (:namespace subject)
+                           (:name subject))
+        options (fact-options subject context)
+        reporter (reporter-for options context)
+        identity (fact-result-identity fact)
+        start (test/clock-now options)
+        start-event (test/report! reporter
+                                  (merge {:event :fact/start}
+                                         identity))]
+    (try
+      (do
+        (test/run-hooks [(:before-each options)
+                         (:before (:meta fact))]
+                        options)
+        {:subject subject
+         :test/start start
+         :test/before-error nil})
+      (catch Throwable error
+        {:subject subject
+         :test/start start
+         :test/before-error (str error)}))))
+
+(defn execute-fact-body
+  [fact options]
+  (try
+    (let [checks
+          (test/normalize-checks
+           (test/settle ((:function fact) options) options))
+          status (if (test/checks-timeout? checks)
+                   :timeout
+                   (if (test/checks-error? checks)
+                     :error
+                     (if (test/checks-pass? checks)
+                       :passed
+                       :failed)))]
+      (merge (fact-result-identity fact)
+             {:status status
+              :checks checks}))
+    (catch Throwable error
+      (error-result fact error))))
+
+(defn run-fact-body
+  [state context]
+  (let [subject (:subject state)
+        fact (resolve-fact (:namespace subject)
+                           (:name subject))
+        options (fact-options subject context)
+        result
+        (if (:test/before-error state)
+          (error-result fact (:test/before-error state))
+          (execute-fact-body fact options))]
+    (assoc state :test/result result)))
+
+(defn after-fact
+  [outcome context]
+  (let [state (:work/body-result outcome)
+        subject (or (:subject state)
+                    (:work/input outcome))
+        fact (resolve-fact (:namespace subject)
+                           (:name subject))
+        options (fact-options subject context)]
+    (try
+      (do
+        (test/run-hooks [(:after (:meta fact))
+                         (:after-each options)]
+                        options)
+        {:status :completed})
+      (catch Throwable error
+        {:status :error
+         :error (str error)}))))
+
+(defn timed-result
+  [result start options]
+  (let [end (test/clock-now options)]
+    (if (and start end)
+      (assoc result :elapsed (- end start))
+      result)))
+
+(defn finalize-fact
+  [outcome context]
+  (let [state (get-in outcome [:work/body :result])
+        subject (:subject state)
+        fact (resolve-fact (:namespace subject)
+                           (:name subject))
+        options (fact-options subject context)
+        cleanup (get-in outcome [:work/cleanup :result])
+        result (if (= :error (:status cleanup))
+                 (error-result fact (:error cleanup))
+                 (:test/result state))
+        result (timed-result result (:test/start state) options)
+        reporter (reporter-for options context)
+        end-event (test/report! reporter
+                                (merge {:event :fact/end}
+                                       result))]
+    result))
+
+(defn running-fact-work
+  [batch-revision]
+  (work/chain
+   {:id 'code.test/fact-scope-chain
+    :version batch-revision}
+   [(work/ensure
+     {:id 'code.test/fact-scope
+      :version batch-revision
+      :return :outcome}
+     (work/chain
+      {:id 'code.test/fact-body-chain
+       :version batch-revision}
+      [(work/step
+        {:id 'code.test/fact-before
+         :version batch-revision}
+        before-fact)
+       (work/step
+        {:id 'code.test/fact-body
+         :version batch-revision}
+        run-fact-body)])
+     (work/step
+      {:id 'code.test/fact-after
+       :version batch-revision}
+      after-fact))
+    (work/step
+     {:id 'code.test/fact-finalize
+      :version batch-revision}
+     finalize-fact)]))
+
+(defn fact-process-work
+  [batch-revision]
+  (work/choose
+   {:id 'code.test/fact-dispatch
+    :version batch-revision}
+   (work/step
+    {:id 'code.test/fact-mode
+     :version batch-revision}
+    fact-mode)
+   {:terminal
+    (work/step
+     {:id 'code.test/fact-terminal
+      :version batch-revision}
+     terminal-fact-result)
+    :run
+    (running-fact-work batch-revision)}))
 
 (defn summarise-fact-batch
   [batch context]
   (summary-from-results
    (work/manifest-values (:results batch))))
 
-(defn fact-batch-work
-  "Returns an opt-in fact graph with one durable checkpoint per selected fact.
+(defn suite-before
+  [prepared context]
+  (let [options (execution-options (:test/options prepared) context)
+        reporter (reporter-for options context)
+        start-event
+        (test/report! reporter
+                      {:event :run/start
+                       :count (count (:test/items prepared))})]
+    (test/run-hook (:before-all options) options)
+    nil))
 
-   Fact-local metadata hooks remain inside each checkpoint. Suite-wide fixtures,
-   fail-fast, external reporters, and test-level cancellation are rejected until
-   the runtime can preserve their ordering and cleanup guarantees explicitly."
+(defn suite-after
+  [outcome context]
+  (let [prepared (:work/input outcome)
+        options (execution-options (:test/options prepared) context)
+        reporter (reporter-for options context)
+        body-result (:work/body-result outcome)]
+    (test/run-hook (:after-all options) options)
+    (if (= :completed (:work/body-status outcome))
+      (test/report! reporter
+                    (merge {:event :run/end}
+                           (:summary body-result)))
+      nil)
+    {:status :completed}))
+
+(defn fact-batch-body
+  [batch-revision]
+  (work/chain
+   {:id 'code.test/fact-batch-body
+    :version batch-revision}
+   [(work/all
+     {:id 'code.test/suite-start
+      :version batch-revision}
+     [(work/pure
+       {:id 'code.test/suite-state
+        :version batch-revision}
+       (fn [prepared context] prepared))
+      (work/step
+       {:id 'code.test/suite-before
+        :version batch-revision}
+       suite-before)])
+    (work/pure
+     {:id 'code.test/suite-state-after-start
+      :version batch-revision}
+     (fn [outputs context]
+       (nth outputs 0)))
+    (work/batch
+     {:id 'code.test/fact-batch-items
+      :version batch-revision}
+     {:list
+      (work/pure
+       {:id 'code.test/fact-list
+        :version batch-revision}
+       (fn [prepared context]
+         (:test/items prepared)))
+
+      :process
+      (fact-process-work batch-revision)
+
+      :summarise
+      (work/pure
+       {:id 'code.test/fact-summary
+        :version batch-revision}
+       summarise-fact-batch)})]))
+
+(defn fact-batch-work
+  "Returns an opt-in fact graph with independently checkpointed fact bodies.
+
+   Suite and fact cleanup hooks execute through cleanup-safe work scopes.
+   Reporters are bridged into durable work history. Fail-fast scheduling remains
+   on the cleanup-safe suite runner until the runtime owns queued item claims."
   ([]
    (fact-batch-work +default-revision+))
   ([batch-revision]
-   (work/batch
+   (work/chain
     {:id 'code.test/fact-batch
      :version batch-revision
      :test/revision batch-revision}
-    {:list
-     (work/pure
-      {:id 'code.test/fact-list
+    [(work/pure
+      {:id 'code.test/fact-batch-prepare
        :version batch-revision}
       (fn [input context]
-        (fact-manifest input context batch-revision)))
-
-     :process
-     (work/step
-      {:id 'code.test/fact-run
+        (prepare-fact-batch input context batch-revision)))
+     (work/ensure
+      {:id 'code.test/suite-scope
        :version batch-revision}
-      process-fact-item)
-
-     :summarise
-     (work/pure
-      {:id 'code.test/fact-summary
-       :version batch-revision}
-      summarise-fact-batch)})))
+      (fact-batch-body batch-revision)
+      (work/step
+       {:id 'code.test/suite-after
+        :version batch-revision}
+       suite-after))])))
 
 (defn batch-summary
   [result]
   (:summary result))
 
 (defn run-batch
-  "Runs selected facts as independently checkpointed batch items and returns
-   the ordinary code.test summary."
+  "Runs selected facts as independently checkpointed items and returns the
+   ordinary code.test summary."
   ([runtime]
    (run-batch runtime {} {}))
   ([runtime options]

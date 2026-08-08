@@ -1,0 +1,235 @@
+(ns code.test-work-cleanup-test
+  (:require [code.test :as fact]
+            [code.test.work :as test-work]
+            [std.lib.test :as test]
+            [std.work :as work]))
+
+(defn event-count
+  [events event]
+  (reduce
+   (fn [total record]
+     (if (= event (:event record))
+       (inc total)
+       total))
+   0
+   events))
+
+(def lifecycle (atom []))
+(def reporter (fact/event-reporter))
+
+(fact/register!
+ "scoped passing fact"
+ (fn [options]
+   [(fact/check
+     (fn []
+       (swap! lifecycle conj :body)
+       1)
+     1
+     options)])
+ {:test/definition "definition:scoped-passing-v1"
+  :before (fn [] (swap! lifecycle conj :fact-before))
+  :after (fn [] (swap! lifecycle conj :fact-after))})
+
+(def scoped-options
+  {:namespace 'code.test-work-cleanup-test
+   :name "scoped passing fact"
+   :test/revision 21
+   :before-all (fn [] (swap! lifecycle conj :before-all))
+   :after-all (fn [] (swap! lifecycle conj :after-all))
+   :before-each (fn [] (swap! lifecycle conj :before-each))
+   :after-each (fn [] (swap! lifecycle conj :after-each))})
+
+(def scoped-runtime (work/durable-runtime))
+(def scoped-reference
+  (test-work/start-batch
+   scoped-runtime
+   scoped-options
+   {:id "cleanup-scoped-fact"
+    :context {:test/reporter reporter}}))
+(def scoped-summary
+  (test-work/batch-result scoped-runtime scoped-reference))
+(def scoped-history
+  (work/history scoped-runtime scoped-reference))
+(def scoped-checkpoints
+  (work/checkpoints scoped-runtime scoped-reference))
+(def scoped-order (deref lifecycle))
+(def scoped-events (fact/reporter-events reporter))
+(def same-scoped-reference
+  (test-work/start-batch
+   scoped-runtime
+   scoped-options
+   {:id "cleanup-scoped-fact"
+    :context {:test/reporter reporter}}))
+(def replay-order (deref lifecycle))
+(def replay-events (fact/reporter-events reporter))
+
+(def after-error-count (atom 0))
+(fact/register!
+ "after hook error"
+ (fn [options]
+   [(fact/check (fn [] 1) 1 options)])
+ {:test/definition "definition:after-hook-error-v1"
+  :after (fn []
+           (swap! after-error-count inc)
+           (throw (ex-info "after hook failed" {})))})
+
+(def after-error-runtime (work/durable-runtime))
+(def after-error-reference
+  (test-work/start-batch
+   after-error-runtime
+   {:namespace 'code.test-work-cleanup-test
+    :name "after hook error"
+    :test/revision 22}
+   {:id "cleanup-after-error"}))
+(def after-error-summary
+  (test-work/batch-result after-error-runtime after-error-reference))
+
+(def cancelled-body-count (atom 0))
+(def cancelled-hook-count (atom 0))
+(fact/register!
+ "controlled cancellation"
+ (fn [options]
+   (swap! cancelled-body-count inc)
+   [(fact/check (fn [] 1) 1 options)])
+ {:test/definition "definition:controlled-cancellation-v1"
+  :before (fn [] (swap! cancelled-hook-count inc))
+  :after (fn [] (swap! cancelled-hook-count inc))})
+
+(def controlled-runtime (work/durable-runtime))
+(def controlled-reference
+  (test-work/start-batch
+   controlled-runtime
+   {:namespace 'code.test-work-cleanup-test
+    :name "controlled cancellation"
+    :test/revision 23}
+   {:id "controlled-cancellation"
+    :context
+    {:test/control
+     (fact/function-control (fn [subject] true))}}))
+(def controlled-summary
+  (test-work/batch-result controlled-runtime controlled-reference))
+
+(def cancellation-order (atom []))
+(def cancellation-runtime (work/durable-runtime))
+(fact/register!
+ "runtime cancellation"
+ (fn [options]
+   (swap! cancellation-order conj :body)
+   (work/cancel cancellation-runtime
+                "runtime-cancellation"
+                {:reason :test})
+   [(fact/check (fn [] 1) 1 options)])
+ {:test/definition "definition:runtime-cancellation-v1"
+  :before (fn [] (swap! cancellation-order conj :fact-before))
+  :after (fn [] (swap! cancellation-order conj :fact-after))})
+
+(def cancellation-reference
+  (test-work/start-batch
+   cancellation-runtime
+   {:namespace 'code.test-work-cleanup-test
+    :name "runtime cancellation"
+    :test/revision 24
+    :before-all (fn [] (swap! cancellation-order conj :before-all))
+    :after-all (fn [] (swap! cancellation-order conj :after-all))
+    :before-each (fn [] (swap! cancellation-order conj :before-each))
+    :after-each (fn [] (swap! cancellation-order conj :after-each))}
+   {:id "runtime-cancellation"}))
+
+(def setup-cleanup-count (atom 0))
+(def setup-failure-runtime (work/durable-runtime))
+(def setup-failure-reference
+  (test-work/start-batch
+   setup-failure-runtime
+   {:namespace 'code.test-work-cleanup-test
+    :name "scoped passing fact"
+    :test/revision 25
+    :before-all (fn []
+                  (throw (ex-info "suite setup failed" {})))
+    :after-all (fn [] (swap! setup-cleanup-count inc))}
+   {:id "suite-setup-failure"}))
+
+(def results
+  [(test/check
+    "fact and suite hooks use cleanup-safe durable scopes"
+    [(:status scoped-summary)
+     scoped-order
+     (count scoped-checkpoints)
+     (vec (map :event scoped-events))
+     (event-count scoped-history :test/run-started)
+     (event-count scoped-history :test/fact-started)
+     (event-count scoped-history :test/fact-completed)
+     (event-count scoped-history :test/run-completed)]
+    [:passed
+     [:before-all
+      :before-each
+      :fact-before
+      :body
+      :fact-after
+      :after-each
+      :after-all]
+     7
+     [:run/start :fact/start :fact/end :run/end]
+     1 1 1 1])
+
+   (test/check
+    "idempotent starts do not rerun hooks or duplicate reporter events"
+    [(= (:run/id (work/run-record scoped-runtime scoped-reference))
+        (:run/id (work/run-record scoped-runtime same-scoped-reference)))
+     replay-order
+     (vec (map :event replay-events))]
+    [true
+     [:before-all
+      :before-each
+      :fact-before
+      :body
+      :fact-after
+      :after-each
+      :after-all]
+     [:run/start :fact/start :fact/end :run/end]])
+
+   (test/check
+    "after-hook failures remain completed test-domain errors"
+    [(work/status after-error-runtime after-error-reference)
+     (:status after-error-summary)
+     (get-in after-error-summary [:counts :error])
+     (deref after-error-count)]
+    [:completed :failed 1 1])
+
+   (test/check
+    "test controls cancel facts before their hooks and body"
+    [(work/status controlled-runtime controlled-reference)
+     (:status controlled-summary)
+     (get-in controlled-summary [:counts :cancelled])
+     (deref cancelled-body-count)
+     (deref cancelled-hook-count)]
+    [:completed :passed 1 0 0])
+
+   (test/check
+    "runtime cancellation still executes fact and suite cleanup"
+    [(work/status cancellation-runtime cancellation-reference)
+     (deref cancellation-order)
+     (event-count (work/history cancellation-runtime cancellation-reference)
+                  :work/run-cancelled)]
+    [:cancelled
+     [:before-all
+      :before-each
+      :fact-before
+      :body
+      :fact-after
+      :after-each
+      :after-all]
+     1])
+
+   (test/check
+    "suite cleanup runs when suite setup fails"
+    [(work/status setup-failure-runtime setup-failure-reference)
+     (deref setup-cleanup-count)]
+    [:failed 1])
+
+   (test/check-error
+    "fact batches still reject fail-fast until scheduling owns item claims"
+    (test-work/run-batch
+     (work/local-runtime)
+     (assoc scoped-options :fail-fast true)))])
+
+(test/print-results results)
