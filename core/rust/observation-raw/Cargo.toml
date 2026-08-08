@@ -18,18 +18,6 @@ publish = false
 name = "hara_bytecode_observation_raw"
 crate-type = ["cdylib", "rlib"]
 
-[features]
-default = ["bytecode-observation"]
-evaluation-journal = []
-halc-encoder = []
-hir-encoder = ["halc-encoder"]
-bytecode-vm = []
-bytecode-instrumentation = ["bytecode-vm"]
-bytecode-observation = ["bytecode-vm"]
-tracing-jit = ["bytecode-vm"]
-native-jit = ["tracing-jit"]
-whole-wasm = ["bytecode-vm"]
-
 [profile.browser-release]
 inherits = "release"
 opt-level = "z"
@@ -39,4 +27,4 @@ panic = "abort"
 strip = "symbols"
 
 [dependencies]
-sha2 = "0.10"
+hara-wasm = { path = "..", default-features = false, features = ["bytecode-observation"] }
