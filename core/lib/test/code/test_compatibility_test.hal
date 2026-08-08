@@ -43,6 +43,6 @@
 (fact "Foundation code.test CLI selectors retain :only semantics"
   (test-task/process-test-args
    [":only" "std" "code" ":parallel" "true"])
-  => {:ns ['std 'code] :parallel true})
+  => {:namespace ['std 'code] :parallel true})
 
 (pr-str (run {:namespace "code.test-compatibility-test"}))

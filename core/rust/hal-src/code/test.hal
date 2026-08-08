@@ -5,8 +5,10 @@
 ;; receives structured events; hosts decide whether and how to print them.
 ;; ============================================================================
 (ns code.test
-  (:require [code.test.protocol :as protocol]
-            [std.lib.task :as task]))
+  (:require [code.test.cli :as cli]
+            [code.test.protocol :as protocol]
+            [code.test.selector :as selector]
+            [std.work :as work]))
 
 (defstruct TestRegistry [state])
 (defstruct NullReporter [value])
@@ -582,10 +584,8 @@
   (fact-form description body (meta &form)))
 
 (defn selector-match?
-  [selector value]
-  (if (nil? selector)
-    true
-    (task/select-filter selector value)))
+  [selection value]
+  (selector/matches? selection value))
 
 (defn tag-selected?
   [fact options]
@@ -594,13 +594,13 @@
         exclude (:exclude-tags options)
         included (if include
                    (reduce (fn [found tag]
-                             (or found (task/select-filter include tag)))
+                             (or found (selector/matches? include tag)))
                            false
                            tags)
                    true)
         excluded (if exclude
                    (reduce (fn [found tag]
-                             (or found (task/select-filter exclude tag)))
+                             (or found (selector/matches? exclude tag)))
                            false
                            tags)
                    false)]
@@ -846,28 +846,70 @@
         end-report (report! reporter (merge {:event :run/end} summary))]
     summary))
 
-(defn run-task-main
-  [package]
-  (run-selected nil (first package)))
+(def +default-work-revision+ 1)
 
-(def +runner-task+
-  (task/task :default
-             "code.test/run"
-             {:main {:fn run-task-main}}))
+(defn work-revision
+  [options]
+  (or (:test/revision options)
+      +default-work-revision+))
+
+(defn work-context-options
+  [context]
+  (let [base (or (:test/options context) {})
+        reporter (:test/reporter context)
+        clock (:test/clock context)
+        timer (:test/timer context)
+        control (:test/control context)]
+    (merge base
+           (if reporter {:reporter reporter} {})
+           (if clock {:clock clock} {})
+           (if timer {:timer timer} {})
+           (if control {:control control} {}))))
+
+(defn work-execution-options
+  [input context]
+  (merge (or input {})
+         (work-context-options context)))
+
+(defn suite-work
+  "Returns one checkpointed suite boundary preserving code.test's existing
+   before-all/after-all, fail-fast, cancellation, timeout, and reporting rules."
+  ([]
+   (suite-work +default-work-revision+))
+  ([suite-revision]
+   (work/step
+    {:id 'code.test/run
+     :version suite-revision
+     :test/revision suite-revision}
+    (fn [input context]
+      (run-selected nil
+                    (work-execution-options input context))))))
+
+(def +runner-work+ (suite-work))
+
+(defn normalize-run-options
+  [selector-or-options]
+  (if (map? selector-or-options)
+    selector-or-options
+    {:namespace selector-or-options}))
 
 (defn run
-  "Runs selected facts and returns a structured summary.
+  "Runs selected facts through an IWorkRuntime and returns a structured summary.
 
-   In-process execution is deliberately direct. The portable task descriptor is
-   retained for external task/CLI integration, but routing `run` back through a
-   Task caused recursive IFn dispatch on Rust and unresolved protocol dispatch on
-   the JVM."
+   The one-argument form preserves local in-process execution. Additional arities
+   accept an explicit runtime and work options for durable IDs, observers, and
+   runtime context capabilities."
   ([] (run {}))
   ([selector-or-options]
-   (let [options (if (map? selector-or-options)
-                   selector-or-options
-                   {:namespace selector-or-options})]
-     (run-selected nil options))))
+   (run (work/local-runtime) selector-or-options {}))
+  ([runtime selector-or-options]
+   (run runtime selector-or-options {}))
+  ([runtime selector-or-options work-options]
+   (let [options (normalize-run-options selector-or-options)]
+     (work/run runtime
+               (suite-work (work-revision options))
+               options
+               work-options))))
 
 (defn run-tests
   "Compatibility name for run."
@@ -920,7 +962,7 @@
 
 (defn process-test-args
   [arguments]
-  (task/process-ns-args (task/collapse-only arguments)))
+  (cli/process-args (cli/collapse-only arguments)))
 
 (defn -main
   [& arguments]
