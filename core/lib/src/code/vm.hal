@@ -1,0 +1,17 @@
+(ns code.vm
+  (:require [code.vm.model :as model]))
+
+(def kinds model/+vm-kinds+)
+(def statuses model/+vm-statuses+)
+(def terminal-statuses model/+terminal-statuses+)
+(def default-limits model/+default-limits+)
+
+(def normalize-limits model/normalize-limits)
+(def machine? model/machine?)
+(def machine model/machine)
+(def transition? model/transition?)
+(def transition model/transition)
+(def advance model/advance)
+(def snapshot model/snapshot)
+(def trace model/trace)
+(def terminal? model/terminal?)
