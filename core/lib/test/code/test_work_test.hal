@@ -48,7 +48,7 @@
    (work/local-runtime)
    (test-work/fact-work
     'code.test-work-test
-    "work-driven passing fact"
+    "work-driven failing fact"
     7)
    {}
    {:context {:test/reporter reporter}}))
@@ -84,6 +84,6 @@
     [(:status reported-result)
      (vec (map (fn [event] (:event event))
                (fact/reporter-events reporter)))]
-    [:passed [:fact/start :fact/end]])])
+    [:failed [:fact/start :fact/end]])])
 
 (test/print-results results)
