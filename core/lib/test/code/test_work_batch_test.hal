@@ -8,6 +8,7 @@
 (def failing-count (atom 0))
 
 (fact/fact "batch passing fact"
+  {:test/definition "definition:batch-passing-v1"}
   (do
     (swap! passing-count inc)
     1)
@@ -45,9 +46,14 @@
    options))
 (def final-counts [(deref passing-count) (deref failing-count)])
 
+(def digest-fact
+  {:namespace 'code.test-work-batch-test
+   :name "synthetic digest fact"
+   :meta {:test/digest "sha256:synthetic-v2"}})
+
 (def results
   [(test/check
-    "fact batch manifests are deterministic and identity based"
+    "fact batch manifests are deterministic and definition aware"
     [(:op (work/work-spec (test-work/fact-batch-work 11)))
      (vec (map (fn [item] (:item/id item))
                (:items durable-result)))]
@@ -55,11 +61,24 @@
      [[:test/fact
        "code.test-work-batch-test"
        "batch failing fact"
+       11
        11]
       [:test/fact
        "code.test-work-batch-test"
        "batch passing fact"
-       11]]])
+       11
+       "definition:batch-passing-v1"]]])
+
+   (test/check
+    "explicit source digests invalidate checkpoint identity"
+    [(test-work/fact-definition-token digest-fact 11)
+     (test-work/fact-item-coordinate digest-fact 11)]
+    ["sha256:synthetic-v2"
+     [:test/fact
+      "code.test-work-batch-test"
+      "synthetic digest fact"
+      11
+      "sha256:synthetic-v2"]])
 
    (test/check
     "durable batches checkpoint each fact and preserve test-domain results"

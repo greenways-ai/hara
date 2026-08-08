@@ -38,6 +38,28 @@
   (or (:test/revision (:meta fact))
       default-revision))
 
+(defn fact-definition-token
+  "Returns the stable definition token used to invalidate a fact checkpoint.
+
+   A producer may supply a canonical source digest as `:test/digest`, or another
+   stable definition identity as `:test/definition`. The explicit fact/suite
+   revision remains the compatibility fallback until portable source hashing is
+   available in every runtime."
+  [fact default-revision]
+  (let [metadata (:meta fact)]
+    (or (:test/digest metadata)
+        (:test/definition metadata)
+        (fact-revision fact default-revision))))
+
+(defn fact-item-coordinate
+  [fact default-revision]
+  (let [fact-revision (fact-revision fact default-revision)]
+    (conj
+     (fact-coordinate (:namespace fact)
+                      (:name fact)
+                      fact-revision)
+     (fact-definition-token fact default-revision))))
+
 (defn resolve-fact
   [namespace name]
   (let [namespace (fact-identity namespace)
@@ -121,15 +143,14 @@
 
 (defn fact-item
   [fact options default-revision]
-  (let [fact-revision (fact-revision fact default-revision)]
-    {:item/id
-     (fact-coordinate (:namespace fact)
-                      (:name fact)
-                      fact-revision)
+  (let [fact-revision (fact-revision fact default-revision)
+        definition-token (fact-definition-token fact default-revision)]
+    {:item/id (fact-item-coordinate fact default-revision)
      :item/value
      {:namespace (fact-identity (:namespace fact))
       :name (fact-identity (:name fact))
       :test/revision fact-revision
+      :test/definition definition-token
       :test/options options}}))
 
 (defn fact-manifest
