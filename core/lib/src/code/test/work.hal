@@ -1,0 +1,100 @@
+;; Native std.work adapters for code.test. The test library retains ownership of
+;; fact registration, matching, fixtures, reporting, and result semantics;
+;; std.work owns execution, lifecycle, replay, and checkpoints.
+(ns code.test.work
+  (:require [code.test :as test]
+            [std.work :as work]))
+
+(def +default-revision+ 1)
+
+(defn revision
+  [options]
+  (or (:test/revision options)
+      +default-revision+))
+
+(defn context-options
+  [context]
+  (let [base (or (:test/options context) {})
+        reporter (:test/reporter context)
+        clock (:test/clock context)
+        timer (:test/timer context)
+        control (:test/control context)]
+    (merge base
+           (if reporter {:reporter reporter} {})
+           (if clock {:clock clock} {})
+           (if timer {:timer timer} {})
+           (if control {:control control} {}))))
+
+(defn execution-options
+  [input context]
+  (merge (or input {})
+         (context-options context)))
+
+(defn suite-work
+  "Returns one checkpointed suite boundary preserving code.test's existing
+   before-all/after-all, fail-fast, cancellation, timeout, and reporting rules."
+  ([]
+   (suite-work +default-revision+))
+  ([suite-revision]
+   (work/step
+    {:id 'code.test/run
+     :version suite-revision
+     :test/revision suite-revision}
+    (fn [input context]
+      (test/run-selected nil
+                         (execution-options input context))))))
+
+(defn fact-coordinate
+  [namespace name fact-revision]
+  [:test/fact namespace name fact-revision])
+
+(defn resolve-fact
+  [namespace name]
+  (let [fact (test/get-fact namespace name)]
+    (if fact
+      fact
+      (throw
+       (ex-info "Registered test fact does not exist"
+                {:namespace namespace
+                 :name name}))))))
+
+(defn fact-work
+  "Returns one checkpointed fact boundary. Assertion failures, skips, timeouts,
+   and test errors are completed domain results returned by code.test/run-fact."
+  ([namespace name]
+   (fact-work namespace name +default-revision+))
+  ([namespace name fact-revision]
+   (work/step
+    {:id (fact-coordinate namespace name fact-revision)
+     :version fact-revision
+     :test/revision fact-revision}
+    (fn [input context]
+      (let [options (execution-options input context)
+            reporter (or (:reporter options)
+                         test/+null-reporter+)]
+        (test/run-fact
+         (resolve-fact namespace name)
+         reporter
+         options))))))
+
+(defn run
+  "Runs a selected test suite through an explicit IWorkRuntime."
+  ([runtime]
+   (run runtime {} {}))
+  ([runtime options]
+   (run runtime options {}))
+  ([runtime options work-options]
+   (work/run runtime
+             (suite-work (revision options))
+             options
+             work-options)))
+
+(defn start
+  "Starts a selected test suite through an explicit IWorkRuntime."
+  ([runtime options]
+   (start runtime options {}))
+  ([runtime options work-options]
+   (work/start runtime
+               (suite-work (revision options))
+               options
+               work-options)))
