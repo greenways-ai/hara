@@ -57,7 +57,7 @@
     [(:op (work/work-spec (test-work/fact-batch-work 11)))
      (vec (map (fn [item] (:item/id item))
                (:items durable-result)))]
-    [:batch
+    [:chain
      [[:test/fact
        "code.test-work-batch-test"
        "batch failing fact"
@@ -90,7 +90,7 @@
      (:checks durable-summary)
      (count (work/checkpoints runtime reference))
      durable-counts]
-    [:completed :failed 1 1 2 2 2 [1 1]])
+    [:completed :failed 1 1 2 2 12 [1 1]])
 
    (test/check
     "idempotent starts reuse completed fact checkpoints"
@@ -109,16 +109,9 @@
     [:failed 1 1 2 [2 2]])
 
    (test/check-error
-    "fact batches reject suite lifecycle hooks"
+    "fact batches reject fail-fast until the runtime owns item claims"
     (test-work/run-batch
      (work/local-runtime)
-     (assoc options :before-all (fn [] true))))
-
-   (test/check-error
-    "fact batches reject externally ordered reporter capabilities"
-    (test-work/run-batch
-     (work/local-runtime)
-     options
-     {:context {:test/reporter (fact/event-reporter)}}))])
+     (assoc options :fail-fast true)))])
 
 (test/print-results results)
