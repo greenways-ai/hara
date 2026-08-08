@@ -143,9 +143,6 @@
     (or (nil? selector) (= :all selector))
     true
 
-    (fn? selector)
-    (if (selector package) true false)
-
     (or (string? selector) (symbol? selector) (keyword? selector))
     (string/starts-with? (str package) (str selector))
 
