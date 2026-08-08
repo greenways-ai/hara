@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::core::Value;
 use crate::vm::machine::observation::{
     InstructionSnapshot, MachineSnapshot, ObservationEventKind, ObservationEventStatus,
     SourcePositionSnapshot,
@@ -50,6 +51,15 @@ impl TraceStepRecord {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct EvidenceLabel(&'static str);
+
+impl From<&EvidenceLabel> for String {
+    fn from(value: &EvidenceLabel) -> Self {
+        value.0.into()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) enum CompactEventRecord {
     Instruction {
@@ -64,7 +74,7 @@ pub(super) enum CompactEventRecord {
     Transition {
         id: String,
         sequence: u64,
-        transition: &'static str,
+        transition: EvidenceLabel,
         from_function: usize,
         from_ip: usize,
         to_function: usize,
@@ -75,7 +85,7 @@ pub(super) enum CompactEventRecord {
     Terminal {
         id: String,
         sequence: u64,
-        terminal: &'static str,
+        terminal: EvidenceLabel,
         function: usize,
         ip: usize,
         stack_depth: usize,
@@ -106,7 +116,7 @@ impl CompactEventRecord {
             | ObservationEventKind::MachineResume => Self::Transition {
                 id,
                 sequence: step.sequence,
-                transition: step.kind.as_keyword(),
+                transition: EvidenceLabel(step.kind.as_keyword()),
                 from_function: step.before.function,
                 from_ip: step.before.ip,
                 to_function: step.after.function,
@@ -118,7 +128,7 @@ impl CompactEventRecord {
                 Self::Terminal {
                     id,
                     sequence: step.sequence,
-                    terminal: step.kind.as_keyword(),
+                    terminal: EvidenceLabel(step.kind.as_keyword()),
                     function: step.after.function,
                     ip: step.after.ip,
                     stack_depth: stack_depth(&step.after),
@@ -203,7 +213,50 @@ impl SessionMetrics {
 #[path = "evidence/document.rs"]
 mod document;
 
-pub(super) use document::{events_document, metrics_document, snapshot_value, trace_document};
+pub(super) fn metrics_document(
+    session_id: &str,
+    trace_id: &str,
+    sequence: u64,
+    status: &str,
+    metrics: &SessionMetrics,
+) -> Value {
+    document::metrics_document(session_id, trace_id, sequence, status, metrics)
+}
+
+pub(super) fn events_document<'a>(
+    session_id: &str,
+    trace_id: &str,
+    sequence: u64,
+    status: &str,
+    events: impl IntoIterator<Item = &'a CompactEventRecord>,
+    dropped: u64,
+) -> Value {
+    document::events_document(session_id, trace_id, sequence, status, events, dropped)
+}
+
+pub(super) fn trace_document<'a>(
+    session_id: &str,
+    trace_id: &str,
+    source_id: &str,
+    sequence: u64,
+    status: &str,
+    steps: impl IntoIterator<Item = &'a TraceStepRecord>,
+    dropped: u64,
+) -> Value {
+    document::trace_document(
+        session_id,
+        trace_id,
+        source_id,
+        sequence,
+        status,
+        steps,
+        dropped,
+    )
+}
+
+pub(super) fn snapshot_value(snapshot: &MachineSnapshot, source_id: &str) -> Value {
+    document::snapshot_value(snapshot, source_id)
+}
 
 fn stack_depth(snapshot: &MachineSnapshot) -> usize {
     snapshot.stack.len().saturating_add(snapshot.stack_omitted)
