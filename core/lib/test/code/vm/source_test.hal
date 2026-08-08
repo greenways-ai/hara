@@ -1,0 +1,100 @@
+(ns code.vm.source-test
+  (:require [code.vm :as vm]
+            [code.vm.source :as source]
+            [std.lib.test :as test]))
+
+(def +nested-source+
+  "(+ 1\n   (* 2 3))")
+
+(def +comment-source+
+  "(+ 1 ; comment\n   (* 2 3))")
+
+(def results
+  [(test/check
+    "source indexes preserve semantic paths, exact source, and spans"
+    (let [index
+          (source/index
+           +nested-source+
+           {:id "lesson/main"
+            :version 4})
+          forms (source/forms index)]
+      [(:source/id index)
+       (:source/version index)
+       (:source/text index)
+       (vec (map (fn [form] (:form/path form)) forms))
+       (vec (map (fn [form] (:form/source form)) forms))
+       (vec (map (fn [form] (:form/span form)) forms))])
+    ["lesson/main"
+     4
+     +nested-source+
+     [[0]
+      [0 0]
+      [0 1]
+      [0 2]
+      [0 2 0]
+      [0 2 1]
+      [0 2 2]]
+     ["(+ 1\n   (* 2 3))"
+      "+"
+      "1"
+      "(* 2 3)"
+      "*"
+      "2"
+      "3"]
+     [{:start 0 :end 16}
+      {:start 1 :end 2}
+      {:start 3 :end 4}
+      {:start 8 :end 15}
+      {:start 9 :end 10}
+      {:start 11 :end 12}
+      {:start 13 :end 14}]])
+
+   (test/check
+    "comments and whitespace affect spans without changing form paths"
+    (let [index (source/index +comment-source+)
+          inner (source/form-at index [0 2])]
+      [(:source/text index)
+       (:form/source inner)
+       (:form/span inner)])
+    [+comment-source+
+     "(* 2 3)"
+     {:start 18 :end 25}])
+
+   (test/check
+    "source references resolve by semantic path or exact span"
+    (let [index (vm/source-index +nested-source+)
+          by-path (vm/source-resolve index {:form/path [0 2]})
+          by-span
+          (vm/source-resolve
+           index
+           {:form/span {:start 8 :end 15}})]
+      [(:form/path by-path)
+       (:form/source by-path)
+       (:form/path by-span)
+       (:form/source by-span)])
+    [[0 2] "(* 2 3)" [0 2] "(* 2 3)"])
+
+   (test/check
+    "ordinary Hara forms receive one normalized source entry point"
+    (let [index (source/index '(+ 1 (* 2 3)))
+          entry (source/entry-form index)]
+      [(:source/text index)
+       (:form/path entry)
+       (:form/source entry)
+       (:form/path (source/form-at index [0 2]))])
+    ["(+ 1 (* 2 3))"
+     [0]
+     "(+ 1 (* 2 3))"
+     [0 2]])
+
+   (test/check
+    "invalid source identities fail before indexing"
+    (try
+      (do
+        (source/index "(+ 1 2)" {:id ""})
+        false)
+      (catch Throwable error
+        true))
+    true)])
+
+(test/print-results results)

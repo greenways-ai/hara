@@ -1,5 +1,6 @@
 (ns code.vm
   (:require [code.vm.model :as model]
+            [code.vm.source :as source]
             [code.vm.interpreter :as interpreter]))
 
 (def kinds model/+vm-kinds+)
@@ -17,10 +18,20 @@
 (def trace model/trace)
 (def terminal? model/terminal?)
 
+(def source? source/source?)
+(def source-form? source/form?)
+(def source-index source/index)
+(def source-forms source/forms)
+(def source-form-at source/form-at)
+(def source-form-by-span source/form-by-span)
+(def source-entry-form source/entry-form)
+(def source-resolve source/resolve)
+
 (def interpreter-journal-schema interpreter/+journal-schema+)
 (def interpreter-journal? interpreter/journal?)
 (def interpreter-machine? interpreter/interpreter-machine?)
 (def interpreter-create interpreter/create)
+(def interpreter-source-index interpreter/source-index)
 (def interpreter-step interpreter/step)
 (def interpreter-run interpreter/run)
 (def interpreter-from-journal interpreter/from-journal)
