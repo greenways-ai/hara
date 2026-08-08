@@ -1,0 +1,38 @@
+name: Diagnose PR 430 base
+
+on:
+  push:
+    branches:
+      - agent/diagnose-pr430-base
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-rust:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - foundation_code_test_compatibility_namespaces_are_embedded
+          - namespace_use_refers_portable_test_vars_and_macros
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout hara-specs-registry
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-specs-registry
+          path: hara-specs-registry
+          fetch-depth: 1
+      - name: Expose specs registry at the runtime fixture path
+        run: ln -sfn "$GITHUB_WORKSPACE/hara-specs-registry" "$GITHUB_WORKSPACE/../hara-specs-registry"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run isolated test on the PR base
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          cargo test --manifest-path core/rust/Cargo.toml \
+            "tests::${{ matrix.test }}" \
+            -- --exact --nocapture --test-threads=1
