@@ -17,7 +17,7 @@
     "test:hta": "node --test hta.test.js",
     "test:hta:pack": "node test-packed-hta.mjs",
     "test:wasm-runtime": "node --test portable-code-test.test.mjs",
-    "test:studio": "node --test package-cache.test.mjs hara-web.test.mjs studio-host-services.test.mjs studio-broker.test.mjs studio-hal.test.mjs ../../contrib/greenways/supersonic/test/supersonic.test.mjs studio-ui.test.mjs studio-document-runtime.test.mjs studio-canvas-runtime.test.mjs studio-node-runtime.test.mjs studio-workspace.test.mjs studio-program-host.test.mjs studio-graph-host.test.mjs studio-session-router.test.mjs studio-capability-registry.test.mjs website-workspaces.test.mjs website-publishing.test.mjs",
+    "test:studio": "node --test package-cache.test.mjs hara-web.test.mjs bytecode-observation.test.mjs studio-host-services.test.mjs studio-broker.test.mjs studio-hal.test.mjs ../../contrib/greenways/supersonic/test/supersonic.test.mjs studio-ui.test.mjs studio-document-runtime.test.mjs studio-canvas-runtime.test.mjs studio-node-runtime.test.mjs studio-workspace.test.mjs studio-program-host.test.mjs studio-graph-host.test.mjs studio-session-router.test.mjs studio-capability-registry.test.mjs website-workspaces.test.mjs website-publishing.test.mjs",
     "test:browser": "playwright test"
   },
   "dependencies": {

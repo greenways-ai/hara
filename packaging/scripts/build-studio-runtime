@@ -5,133 +5,33 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 CRATE_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/core/rust/Cargo.toml" | head -n 1)
 VERSION=${1:-$CRATE_VERSION}
 OUT=${HARA_STUDIO_RUNTIME_OUT:-"$ROOT/core/target/studio-runtime"}
-RAW_WASM="$ROOT/core/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
 STAGE="$OUT/hara-studio-runtime-$VERSION"
 ARCHIVE="$OUT/hara-studio-runtime-$VERSION.tar.gz"
+OBSERVATION_WASM="$ROOT/core/rust/observation-raw/target/wasm32-unknown-unknown/browser-release/hara_bytecode_observation_raw.wasm"
 
 if [ -z "$CRATE_VERSION" ]; then
   echo "unable to read the Hara runtime version from core/rust/Cargo.toml" >&2
   exit 1
 fi
-if [ "$VERSION" != "ci" ]; then
-  if [ "$VERSION" != "$CRATE_VERSION" ]; then
-    echo "Studio runtime version $VERSION does not match core/rust/Cargo.toml $CRATE_VERSION" >&2
-    exit 1
-  fi
-  node "$ROOT/packaging/scripts/check-release-version.mjs" "$VERSION"
-fi
 
-if [ ! -f "$RAW_WASM" ]; then
-  "$ROOT/packaging/scripts/build-hara-wasm-raw"
-fi
+# Preserve the established Studio archive assembly as a stable base. The live
+# observation payload is an optional second Wasm module layered into that stage,
+# keeping normal evaluation on the lean raw runtime.
+"$ROOT/packaging/scripts/build-studio-runtime-base" "$VERSION" >/dev/null
+bash "$ROOT/packaging/scripts/build-bytecode-observation-wasm" >/dev/null
 
-mkdir -p "$OUT"
-if [ -e "$STAGE" ]; then
-  echo "refusing to replace existing staging directory: $STAGE" >&2
-  exit 1
-fi
-mkdir -p "$STAGE/rust/host" "$STAGE/rust/packages/hta" \
-         "$STAGE/rust/studio/hal" "$STAGE/rust/studio/capabilities" "$STAGE/rust/ui" \
-         "$STAGE/rust/std/lib/substrate" \
-         "$STAGE/examples/starter/src" \
-         "$STAGE/examples/game/src" \
-         "$STAGE/examples/music/src" \
-         "$STAGE/examples/music/runtime" \
-         "$STAGE/examples/music/runtime/host" \
-         "$STAGE/examples/music/runtime/packages/hta" \
-         "$STAGE/examples/music/runtime/studio/hal" \
-         "$STAGE/examples/music/runtime/studio/capabilities" \
-         "$STAGE/examples/music/runtime/std/lib/substrate" \
-         "$STAGE/examples/music/examples/hara-amp/src" \
-         "$STAGE/examples/music/assets/wasm" \
-         "$STAGE/examples/music/assets/hara-amp" \
-         "$STAGE/assets/wasm" \
-         "$STAGE/assets/artwork"
+test -s "$OBSERVATION_WASM"
+cp "$OBSERVATION_WASM" "$STAGE/rust/bytecode-observation.wasm"
+cp "$OBSERVATION_WASM" "$STAGE/examples/music/runtime/bytecode-observation.wasm"
 
-cp "$RAW_WASM" "$STAGE/rust/hara.wasm"
-cp "$ROOT/website/hara-www/vendor/hara-ui/tokens.css" \
-   "$ROOT/website/hara-www/vendor/hara-ui/components.css" \
-   "$ROOT/website/hara-www/vendor/hara-ui/studio.css" \
-   "$ROOT/website/hara-www/vendor/hara-ui/studio-shell.js" \
-   "$STAGE/rust/ui/"
-cp "$ROOT/core/rust/web/hta.js" "$ROOT/core/rust/web/hta-worker.js" "$ROOT/core/rust/web/hta-shared-worker.js" \
-   "$STAGE/rust/"
-# The public wrappers above use relative imports into packages/hta. Package the
-# complete browser module so the archive remains executable after extraction.
-cp "$ROOT"/core/rust/web/packages/hta/* "$STAGE/rust/packages/hta/"
-cp "$ROOT"/core/rust/web/host/*.js "$STAGE/rust/host/"
-cp "$ROOT"/core/rust/web/studio/*.js "$ROOT/core/rust/web/studio/studio.css" "$STAGE/rust/studio/"
-cp "$ROOT"/core/rust/web/studio/capabilities/*.js "$STAGE/rust/studio/capabilities/"
-cp "$ROOT"/core/rust/web/studio/hal/*.hal "$STAGE/rust/studio/hal/"
-cp "$ROOT/contrib/greenways/supersonic/src/js/supersonic.js" \
-   "$STAGE/rust/studio/supersonic.js"
-cp "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" \
-   "$STAGE/rust/studio/hal/supersonic.hal"
-cp "$ROOT/core/lib/src/std/lib/substrate.hal" "$STAGE/rust/studio/hal/substrate.hal"
-cp "$ROOT/core/lib/src/std/lib/substrate/frame.hal" "$STAGE/rust/studio/hal/substrate-frame.hal"
-cp "$ROOT/core/lib/src/std/lib/substrate/protocol.hal" "$STAGE/rust/studio/hal/substrate-protocol.hal"
-cp "$ROOT/core/lib/src/std/lib/substrate.hal" "$STAGE/rust/std/lib/substrate.hal"
-cp "$ROOT/core/lib/src/std/lib/substrate/frame.hal" \
-   "$ROOT/core/lib/src/std/lib/substrate/protocol.hal" \
-   "$STAGE/rust/std/lib/substrate/"
+node "$ROOT/packaging/scripts/verify-bytecode-observation-runtime.mjs" "$STAGE"
 
-cp "$ROOT/website/hara-www/examples/index.json" "$STAGE/examples/index.json"
-cp "$ROOT/website/hara-www/examples/starter/project.edn" "$ROOT/website/hara-www/examples/starter/workspace.edn" \
-   "$STAGE/examples/starter/"
-cp "$ROOT/website/hara-www/examples/starter/src/main.hal" "$STAGE/examples/starter/src/"
-
-cp "$ROOT/website/hara-www/examples/browser-game/project.edn" "$ROOT/website/hara-www/examples/browser-game/workspace.edn" \
-   "$STAGE/examples/game/"
-cp "$ROOT/website/hara-www/sources/tron.hal" "$STAGE/examples/game/src/tron.hal"
-
-cp "$ROOT/website/hara-www/examples/hara-amp/project.edn" "$ROOT/website/hara-www/examples/hara-amp/workspace.edn" \
-   "$STAGE/examples/music/"
-cp "$ROOT/website/hara-www/examples/hara-amp/src/main.hal" \
-   "$ROOT/website/hara-www/examples/hara-amp/src/visualizer.hal" \
-   "$ROOT/website/hara-www/examples/hara-amp/src/amp.hal" \
-   "$STAGE/examples/music/src/"
-cp "$ROOT/website/hara-www/hara-amp.html" "$ROOT/website/hara-www/hara-amp.css" "$ROOT/website/hara-www/hara-amp.js" \
-   "$STAGE/examples/music/"
-cp "$RAW_WASM" "$STAGE/examples/music/runtime/hara.wasm"
-cp "$ROOT/core/rust/web/hta.js" "$ROOT/core/rust/web/hta-worker.js" "$ROOT/core/rust/web/hta-shared-worker.js" \
-   "$STAGE/examples/music/runtime/"
-cp "$ROOT"/core/rust/web/packages/hta/* "$STAGE/examples/music/runtime/packages/hta/"
-cp "$ROOT"/core/rust/web/host/*.js "$STAGE/examples/music/runtime/host/"
-cp "$ROOT"/core/rust/web/studio/*.js "$STAGE/examples/music/runtime/studio/"
-cp "$ROOT"/core/rust/web/studio/capabilities/*.js "$STAGE/examples/music/runtime/studio/capabilities/"
-cp "$ROOT"/core/rust/web/studio/hal/*.hal "$STAGE/examples/music/runtime/studio/hal/"
-cp "$ROOT/contrib/greenways/supersonic/src/js/supersonic.js" \
-   "$STAGE/examples/music/runtime/studio/supersonic.js"
-cp "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" \
-   "$STAGE/examples/music/runtime/studio/hal/supersonic.hal"
-cp "$ROOT/core/lib/src/std/lib/substrate.hal" "$STAGE/examples/music/runtime/std/lib/substrate.hal"
-cp "$ROOT/core/lib/src/std/lib/substrate/frame.hal" "$ROOT/core/lib/src/std/lib/substrate/protocol.hal" \
-   "$STAGE/examples/music/runtime/std/lib/substrate/"
-cp "$ROOT/website/hara-www/examples/hara-amp/src/amp.hal" \
-   "$STAGE/examples/music/examples/hara-amp/src/"
-cp "$ROOT/website/hara-www/assets/wasm/demo-synth.wasm" "$ROOT/website/hara-www/assets/wasm/demo-fft.wasm" \
-   "$STAGE/assets/wasm/"
-cp "$ROOT/website/hara-www/assets/wasm/demo-synth.wasm" "$ROOT/website/hara-www/assets/wasm/demo-fft.wasm" \
-   "$STAGE/examples/music/assets/wasm/"
-cp "$ROOT/website/hara-www/assets/hara-amp/hara-amp-artwork-original.png" \
-   "$ROOT/website/hara-www/assets/hara-amp/hara-amp-emblem.png" \
-   "$ROOT/website/hara-www/assets/hara-amp/hara-emblem.svg" \
-   "$STAGE/assets/artwork/"
-cp "$ROOT/website/hara-www/assets/hara-amp/hara-amp-artwork-original.png" \
-   "$ROOT/website/hara-www/assets/hara-amp/hara-amp-emblem.png" \
-   "$ROOT/website/hara-www/assets/hara-amp/hara-emblem.svg" \
-   "$STAGE/examples/music/assets/hara-amp/"
-
-node "$ROOT/packaging/scripts/verify-studio-runtime.mjs" "$STAGE"
-
-if [ -e "$ARCHIVE" ]; then
-  echo "refusing to replace existing archive: $ARCHIVE" >&2
-  exit 1
-fi
+rm -f "$ARCHIVE" "$ARCHIVE.sha256"
 COPYFILE_DISABLE=1 tar -czf "$ARCHIVE" -C "$STAGE" .
 if command -v sha256sum >/dev/null 2>&1; then
   sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
 else
   shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
 fi
+
 echo "$ARCHIVE"
