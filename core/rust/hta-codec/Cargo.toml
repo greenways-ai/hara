@@ -1,0 +1,15 @@
+[package]
+name = "hara-hta"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.78"
+description = "Dependency-free canonical HTA1 codec for portable Hara ABI values"
+repository = "https://github.com/hara-lang/hara"
+homepage = "https://www.hara-lang.org"
+documentation = "https://docs.rs/hara-hta"
+keywords = ["hara", "serialization", "abi", "codec"]
+categories = ["encoding", "development-tools::ffi"]
+
+[dependencies]
+hara-abi = { version = "0.1.0", path = "../abi" }
