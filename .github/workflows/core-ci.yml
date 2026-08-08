@@ -96,7 +96,6 @@ jobs:
         if: steps.scope.outputs.run_core == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
           components: clippy
 
       - name: Check Rust module layout
@@ -111,16 +110,6 @@ jobs:
           cargo clippy --manifest-path core/rust/Cargo.toml --all-targets
           cargo test --manifest-path core/rust/Cargo.toml
           cargo test --manifest-path core/rust/raw/Cargo.toml
-          cargo clippy --manifest-path core/rust/Cargo.toml \
-            --features bytecode-observation \
-            --lib --no-deps
-          cargo test --manifest-path core/rust/Cargo.toml \
-            --features bytecode-observation \
-            vm::session:: --lib
-          cargo check --manifest-path core/rust/Cargo.toml \
-            --target wasm32-unknown-unknown \
-            --features bytecode-observation \
-            --lib
 
       - name: Set up JDK 21
         if: steps.scope.outputs.run_core == 'true'
@@ -138,3 +127,32 @@ jobs:
       - name: Run library HAL tests
         if: steps.scope.outputs.run_core == 'true'
         run: ./packaging/scripts/run-lib-tests
+
+  bytecode-observation:
+    name: Live bytecode observation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - name: Check native observed sessions
+        run: |
+          cargo clippy --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            --lib --no-deps
+          cargo test --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            vm::session:: --lib
+
+      - name: Check browser observed sessions
+        run: |
+          cargo check --manifest-path core/rust/Cargo.toml \
+            --target wasm32-unknown-unknown \
+            --features bytecode-observation \
+            --lib
