@@ -1,0 +1,288 @@
+(ns code.vm.bytecode
+  (:require [code.vm.model :as model]
+            [code.vm.source :as source]))
+
+(def +trace-schema+ "hal.bytecode-trace/v1")
+
+(def +trace-statuses+ #{:ok :error :suspended})
+(def +event-statuses+ #{:ok :error :suspended})
+(def +event-kinds+
+  #{:program/validated
+    :instruction/execute
+    :call/enter
+    :call/return
+    :exception/unwind
+    :machine/suspend
+    :machine/resume
+    :machine/return
+    :machine/fail})
+
+(defn- invalid [message data]
+  (throw (ex-info message data)))
+
+(defn- map-value [label value]
+  (if (map? value)
+    value
+    (invalid (str "code.vm.bytecode " label " must be a map")
+             {:field label :value value})))
+
+(defn- vector-value [label value]
+  (if (vector? value)
+    value
+    (invalid (str "code.vm.bytecode " label " must be a vector")
+             {:field label :value value})))
+
+(defn- non-empty-string [label value]
+  (if (and (string? value) (> (count value) 0))
+    value
+    (invalid (str "code.vm.bytecode " label " must be a non-empty string")
+             {:field label :value value})))
+
+(defn- positive-integer [label value]
+  (if (and (integer? value) (> value 0))
+    value
+    (invalid (str "code.vm.bytecode " label " must be a positive integer")
+             {:field label :value value})))
+
+(defn- member [label allowed value]
+  (if (has? allowed value)
+    value
+    (invalid (str "Unsupported code.vm.bytecode " label ": " value)
+             {:field label :value value :allowed allowed})))
+
+(defn event?
+  [value]
+  (and (map? value)
+       (integer? (:event/id value))
+       (>= (:event/id value) 0)
+       (integer? (:event/sequence value))
+       (>= (:event/sequence value) 0)
+       (has? +event-kinds+ (:event/kind value))
+       (has? +event-statuses+ (:event/status value))
+       (map? (:machine/before value))
+       (map? (:machine/after value))
+       (or (nil? (:event/instruction value))
+           (map? (:event/instruction value)))
+       (or (nil? (:event/source value))
+           (map? (:event/source value)))
+       (or (nil? (:event/error value))
+           (string? (:event/error value)))))
+
+(defn trace?
+  [value]
+  (and (map? value)
+       (= +trace-schema+ (:trace/schema value))
+       (string? (:trace/id value))
+       (> (count (:trace/id value)) 0)
+       (has? +trace-statuses+ (:trace/status value))
+       (map? (:trace/program value))
+       (vector? (:trace/events value))
+       (every? event? (:trace/events value))
+       (or (nil? (:trace/result value))
+           (map? (:trace/result value)))
+       (or (nil? (:trace/error value))
+           (string? (:trace/error value)))))
+
+(defn normalize-trace
+  [value]
+  (let [trace (map-value "trace" value)
+        schema (:trace/schema trace)
+        id (:trace/id trace)
+        status (:trace/status trace)
+        events (vector-value "trace events" (:trace/events trace))]
+    (if (not= +trace-schema+ schema)
+      (invalid "Unsupported code.vm.bytecode trace schema"
+               {:schema schema :expected +trace-schema+})
+      nil)
+    (non-empty-string "trace id" id)
+    (member "trace status" +trace-statuses+ status)
+    (map-value "program" (:trace/program trace))
+    (reduce
+     (fn [_ event]
+       (if (event? event)
+         nil
+         (invalid "Invalid code.vm.bytecode trace event" {:event event})))
+     nil
+     events)
+    trace))
+
+(defn bytecode-machine?
+  [value]
+  (and (model/machine? value)
+       (= :bytecode (:vm/kind value))
+       (trace? (get-in value [:vm/options :trace]))
+       (source/source? (get-in value [:vm/options :source/index]))))
+
+(defn trace-document
+  [machine]
+  (if (bytecode-machine? machine)
+    (get-in machine [:vm/options :trace])
+    (invalid "code.vm.bytecode requires a bytecode machine" {:value machine})))
+
+(defn source-index
+  [machine]
+  (if (bytecode-machine? machine)
+    (get-in machine [:vm/options :source/index])
+    (invalid "code.vm.bytecode requires a bytecode machine" {:value machine})))
+
+(defn- validate-event-sources
+  [source-index trace]
+  (reduce
+   (fn [_ event]
+     (let [reference (:event/source event)]
+       (if reference
+         (if (source/resolve source-index reference)
+           nil
+           (invalid "code.vm.bytecode event source does not resolve"
+                    {:event event :reference reference}))
+         nil)))
+   nil
+   (:trace/events trace))
+  trace)
+
+(defn- initial-state
+  [trace]
+  {:trace/schema (:trace/schema trace)
+   :trace/id (:trace/id trace)
+   :trace/status (:trace/status trace)
+   :program (:trace/program trace)
+   :event/index 0
+   :event/count (count (:trace/events trace))
+   :event/current nil
+   :source/current nil
+   :instruction/current nil
+   :machine/current nil
+   :result nil
+   :error nil})
+
+(defn create
+  ([input trace] (create input trace {}))
+  ([input trace options]
+   (let [options (map-value "options" (or options {}))
+         normalized (normalize-trace trace)
+         source-options (map-value "source options" (or (:source options) {}))
+         source-index (source/index input source-options)
+         validated (validate-event-sources source-index normalized)
+         adapter-options
+         (merge (map-value "adapter options" (or (:options options) {}))
+                {:trace validated :source/index source-index})]
+     (model/machine
+      :bytecode
+      input
+      {:id (or (:id options) (str "vm/bytecode/" (:trace/id validated)))
+       :state (initial-state validated)
+       :options adapter-options
+       :limits (:limits options)}))))
+
+(defn- event-source
+  [machine trace event]
+  (merge
+   {:trace/id (:trace/id trace)
+    :event/id (:event/id event)
+    :event/sequence (:event/sequence event)}
+   (or (source/resolve (source-index machine) (:event/source event)) {})))
+
+(defn- event-vm-status
+  [event]
+  (let [kind (:event/kind event)]
+    (cond
+      (= kind :machine/return) :returned
+      (= kind :machine/fail) :failed
+      (= kind :machine/suspend) :suspended
+      :else :running)))
+
+(defn- event-state
+  [machine event form]
+  (assoc (:vm/state machine)
+         :event/index (inc (get-in machine [:vm/state :event/index]))
+         :event/current event
+         :source/current form
+         :instruction/current (:event/instruction event)
+         :machine/current (:machine/after event)
+         :result (:event/result event)
+         :error (:event/error event)))
+
+(defn- event-transition
+  [machine trace event]
+  (let [form (source/resolve (source-index machine) (:event/source event))
+        status (event-vm-status event)]
+    (model/transition
+     machine
+     :bytecode
+     (:event/kind event)
+     (event-state machine event form)
+     {:source (event-source machine trace event)
+      :events [event]
+      :status status
+      :result (if (= status :returned) (:event/result event) nil)
+      :error (if (= status :failed) (:event/error event) nil)})))
+
+(defn- final-transition
+  [machine trace]
+  (let [failed (= :error (:trace/status trace))
+        suspended (= :suspended (:trace/status trace))
+        status (if failed :failed (if suspended :suspended :returned))]
+    (model/transition
+     machine
+     :bytecode
+     (if failed :machine/fail (if suspended :machine/suspend :machine/return))
+     (assoc (:vm/state machine)
+            :trace/status (:trace/status trace)
+            :event/current nil
+            :result (:trace/result trace)
+            :error (:trace/error trace))
+     {:source {:trace/id (:trace/id trace)
+               :event/sequence (count (:trace/events trace))}
+      :status status
+      :result (if (= status :returned) (:trace/result trace) nil)
+      :error (if (= status :failed) (:trace/error trace) nil)})))
+
+(defn step
+  [machine]
+  (if (model/terminal? machine)
+    machine
+    (let [trace (trace-document machine)
+          index (get-in machine [:vm/state :event/index])
+          event (get (:trace/events trace) index)]
+      (if event
+        (model/advance machine (event-transition machine trace event))
+        (model/advance machine (final-transition machine trace))))))
+
+(defn resume
+  [machine]
+  (if (= :suspended (:vm/status machine))
+    (step machine)
+    machine))
+
+(defn- suspend-at-limit
+  [machine]
+  (if (or (model/terminal? machine) (= :suspended (:vm/status machine)))
+    machine
+    (model/advance
+     machine
+     (model/transition
+      machine
+      :control
+      :run/step-limit
+      (assoc (:vm/state machine) :suspension/reason :step-limit)
+      {:status :suspended}))))
+
+(defn run
+  ([machine] (run machine {}))
+  ([machine options]
+   (let [options (map-value "run options" (or options {}))
+         limit (positive-integer
+                "run step limit"
+                (or (:steps options) (get-in machine [:vm/limits :steps])))]
+     (loop [current machine remaining limit]
+       (if (or (model/terminal? current) (= :suspended (:vm/status current)))
+         current
+         (if (= remaining 0)
+           (suspend-at-limit current)
+           (recur (step current) (dec remaining))))))))
+
+(defn from-trace
+  ([input trace] (from-trace input trace {}))
+  ([input trace options]
+   (let [options (map-value "options" (or options {}))]
+     (run (create input trace options) (or (:run options) {})))))
