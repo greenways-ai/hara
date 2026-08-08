@@ -1,0 +1,91 @@
+name: Repair live bytecode session compilation
+
+on:
+  pull_request:
+    types: [opened, reopened]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-validate:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/fix-live-bytecode-session-ci'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repair branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust for native and browser validation
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - name: Apply the mechanical compile repair
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          document = Path('core/rust/src/vm/session/evidence/document.rs')
+          text = document.read_text()
+          replacements = {
+              'pub(super) fn metrics_document(': 'pub(in crate::vm::session) fn metrics_document(',
+              'pub(super) fn events_document': 'pub(in crate::vm::session) fn events_document',
+              'pub(super) fn trace_document': 'pub(in crate::vm::session) fn trace_document',
+              'pub(super) fn snapshot_value(': 'pub(in crate::vm::session) fn snapshot_value(',
+              '("transition", string(transition)),': '("transition", string(*transition)),',
+              '("terminal", string(terminal)),': '("terminal", string(*terminal)),',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one document anchor: {old!r}')
+              text = text.replace(old, new, 1)
+          document.write_text(text)
+
+          runtime = Path('core/rust/src/vm/session/control/runtime.rs')
+          text = runtime.read_text()
+          old = 'use crate::core::Value;'
+          new = 'use crate::core::{PromiseState, Value};'
+          if text.count(old) != 1:
+              raise SystemExit('expected one PromiseState import anchor')
+          runtime.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Validate exact scope and native sessions
+        run: |
+          git diff --check
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' \
+            core/rust/src/vm/session/control/runtime.rs \
+            core/rust/src/vm/session/evidence/document.rs | sort)"
+          cargo clippy --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            --lib --no-deps
+          cargo test --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            vm::session:: --lib
+
+      - name: Validate browser sessions
+        run: |
+          cargo check --manifest-path core/rust/Cargo.toml \
+            --target wasm32-unknown-unknown \
+            --features bytecode-observation \
+            --lib
+
+      - name: Commit the validated repair
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            core/rust/src/vm/session/control/runtime.rs \
+            core/rust/src/vm/session/evidence/document.rs
+          git commit -m 'Repair live bytecode session compilation'
+          git fetch origin ${{ github.event.pull_request.head.ref }}
+          git rebase origin/${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
