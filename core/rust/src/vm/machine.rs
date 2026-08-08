@@ -1,11 +1,6 @@
 //! The synchronous stack machine.
 //!
-//! The machine executes validated programs: validation (see
-//! `vm::validate`) is the safety gate, and every indexing operation here
-//! still converts impossible states into [`VmError`] instead of
-//! panicking. The dispatch loop performs no per-instruction heap
-//! allocation — primitive and call arguments reuse a scratch buffer —
-//! and never looks up locals by name or clones forms.
+//! Validated programs reject impossible indexes and avoid per-instruction allocation.
 //!
 //! VM closures and static calls stay inside one machine. Call frames and
 //! compact scalar slots avoid native callback recursion and boxed integer
@@ -39,14 +34,7 @@ mod globals;
 
 #[cfg(feature = "bytecode-observation")]
 #[path = "machine/observation.rs"]
-mod observation;
-#[cfg(feature = "bytecode-observation")]
-pub use observation::{
-    CallFrameSnapshot, HandlerSnapshot, InstructionOperand, InstructionSnapshot,
-    MachineObservationStatus, MachineSnapshot, ObservationEventKind, ObservationEventStatus,
-    ObservationLimits, ObservedStep, ObservedStepOutcome, ProgramSnapshot, SourcePositionSnapshot,
-    ValueSnapshot, BYTECODE_TRACE_SCHEMA,
-};
+pub mod observation;
 
 /// Terminal state of a machine run. Suspension variants belong to the
 /// later async milestone; adding them does not change instruction
@@ -668,7 +656,7 @@ impl Machine {
                 }
             }
             match self.dispatch(&program, function, instruction) {
-                Dispatch::Next(ip) => {
+                Dispatch::Next(ip) | Dispatch::Unwound(ip) => {
                     let mut next_ip = ip;
                     #[cfg(feature = "tracing-jit")]
                     if ip <= self.ip {
@@ -716,14 +704,6 @@ impl Machine {
                         self.jit_path.clear();
                     }
                     self.ip = next_ip;
-                }
-                Dispatch::Unwound(ip) => {
-                    #[cfg(feature = "tracing-jit")]
-                    {
-                        self.jit_path.clear();
-                        self.jit_loop_entries.clear();
-                    }
-                    self.ip = ip;
                 }
                 Dispatch::Call { callee, args } => {
                     #[cfg(feature = "tracing-jit")]

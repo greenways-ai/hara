@@ -30,6 +30,9 @@ jobs:
           path: hara-specs-registry
           fetch-depth: 1
 
+      - name: Expose specs registry at the runtime fixture path
+        run: ln -sfn "$GITHUB_WORKSPACE/hara-specs-registry" "$GITHUB_WORKSPACE/../hara-specs-registry"
+
       - name: Detect core changes
         id: scope
         shell: bash
