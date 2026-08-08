@@ -2,6 +2,28 @@
   (:require [std.work.runtime.base :as base]
             [std.work.runtime.store :as store]))
 
+(def status-transitions
+  {:created #{:created :queued :running :cancelled}
+   :queued #{:queued :running :cancelled}
+   :running #{:running :completed :failed :cancelled}
+   :failed #{:failed :running :cancelled}
+   :completed #{:completed}
+   :cancelled #{:cancelled}})
+
+(defn contains-value?
+  [values value]
+  (reduce
+   (fn [found candidate]
+     (or found (= value candidate)))
+   false
+   (or values [])))
+
+(defn memory-validate-run-id
+  [id]
+  (if (nil? id)
+    (throw (ex-info "Work run identity cannot be nil" {})))
+  id)
+
 (defn memory-next-id
   [state]
   (let [updated
@@ -14,40 +36,45 @@
                        (recur (inc counter)))))))]
     (str "run-" (:counter updated))))
 
+(defn normalise-run
+  [run]
+  (let [status (or (:run/status run) :created)]
+    (merge
+     {:run/revision 0
+      :run/status status
+      :run/execution-status status
+      :run/receipt-status :pending
+      :run/acceptance-status :pending}
+     run
+     {:run/revision (or (:run/revision run) 0)
+      :run/status status
+      :run/execution-status status})))
+
 (defn memory-create-run
   [state run]
-  (let [id (:run/id run)]
-    (swap! state
-           (fn [data]
-             (let [existing (get-in data [:runs id])]
-               (cond
-                 (nil? existing)
-                 (assoc-in data [:runs id] run)
+  (let [run (normalise-run run)
+        id (memory-validate-run-id (:run/id run))
+        updated
+        (swap! state
+               (fn [data]
+                 (let [existing (get-in data [:runs id])]
+                   (cond
+                     (nil? existing)
+                     (assoc-in data [:runs id] run)
 
-                 (base/compatible-run? existing run)
-                 data
+                     (base/compatible-run? existing run)
+                     data
 
-                 :else
-                 (throw
-                  (ex-info "Work run identity conflicts with existing input"
-                           {:run/id id
-                            :existing/work (:run/work-root existing)
-                            :proposed/work (:run/work-root run)}))))))
-    (get-in (deref state) [:runs id])))
+                     :else
+                     (throw
+                      (ex-info "Work run identity conflicts with existing input"
+                               {:run/id id
+                                :existing/work (:run/work-root existing)
+                                :proposed/work (:run/work-root run)}))))))]
+    (get-in updated [:runs id])))
 
 (defn memory-load-run
   [state id]
-  (get-in (deref state) [:runs id]))
-
-(defn memory-update-run
-  [state id updates]
-  (swap! state
-         (fn [data]
-           (let [run (get-in data [:runs id])]
-             (if run
-               (assoc-in data [:runs id] (merge run updates))
-               (throw
-                (ex-info "Work run does not exist" {:run/id id}))))))
   (get-in (deref state) [:runs id]))
 
 (defn memory-list-runs
@@ -59,21 +86,252 @@
        (filter (fn [run] (= status (:run/status run))) runs)
        runs))))
 
-(defn memory-append-event
-  [state event]
-  (let [id (:run/id event)
-        updated
+(defn assert-transition-revision!
+  [run transition]
+  (let [expected (:transition/expected-revision transition)
+        actual (or (:run/revision run) 0)]
+    (if (not= expected actual)
+      (throw
+       (ex-info "Work store revision conflict"
+                {:run/id (:run/id run)
+                 :expected/revision expected
+                 :actual/revision actual}))))
+  run)
+
+(defn assert-status-transition!
+  [run updates]
+  (let [current (:run/status run)
+        proposed (or (:run/status updates) current)
+        allowed (get status-transitions current)]
+    (if (not (contains-value? allowed proposed))
+      (throw
+       (ex-info "Work run status transition is not allowed"
+                {:run/id (:run/id run)
+                 :run/status current
+                 :run/proposed-status proposed}))))
+  run)
+
+(defn canonical-run-updates
+  [updates]
+  (let [updates (or updates {})]
+    (if (has? updates :run/status)
+      (assoc updates :run/execution-status (:run/status updates))
+      updates)))
+
+(defn same-checkpoint?
+  [existing proposed]
+  (= (dissoc existing :checkpoint/sequence)
+     (dissoc proposed :checkpoint/sequence)))
+
+(defn assert-checkpoint-run!
+  [run-id checkpoint]
+  (let [checkpoint-run (:checkpoint/run checkpoint)]
+    (if (and checkpoint-run (not= checkpoint-run run-id))
+      (throw
+       (ex-info "Checkpoint belongs to another work run"
+                {:run/id run-id
+                 :checkpoint/run checkpoint-run
+                 :checkpoint/key (:checkpoint/key checkpoint)}))))
+  checkpoint)
+
+(defn apply-checkpoints
+  [data run-id checkpoints]
+  (let [checkpoints (vec (or checkpoints []))]
+    (loop [index 0
+           data data
+           committed []]
+      (if (= index (count checkpoints))
+        [data committed]
+        (let [proposed
+              (assoc (assert-checkpoint-run! run-id (nth checkpoints index))
+                     :checkpoint/run run-id)
+              key (:checkpoint/key proposed)]
+          (if (nil? key)
+            (throw
+             (ex-info "Checkpoint requires :checkpoint/key"
+                      {:run/id run-id
+                       :checkpoint proposed})))
+          (let [existing (get-in data [:checkpoints key])]
+            (cond
+              (and existing
+                   (= :completed (:checkpoint/status existing)))
+              (if (same-checkpoint? existing proposed)
+                (recur (inc index) data (conj committed existing))
+                (throw
+                 (ex-info "Completed work checkpoint is immutable"
+                          {:run/id run-id
+                           :checkpoint/key key})))
+
+              :else
+              (let [sequence (inc (or (:checkpoint-sequence data) 0))
+                    record (assoc proposed :checkpoint/sequence sequence)
+                    data
+                    (assoc-in
+                     (assoc data :checkpoint-sequence sequence)
+                     [:checkpoints key]
+                     record)]
+                (recur (inc index) data (conj committed record))))))))))
+
+(defn apply-events
+  [data run-id events]
+  (let [events (vec (or events []))]
+    (loop [index 0
+           data data
+           committed []]
+      (if (= index (count events))
+        [data committed]
+        (let [sequence (inc (or (:event-sequence data) 0))
+              record
+              (assoc (nth events index)
+                     :run/id run-id
+                     :event/sequence sequence)
+              existing (vec (or (get-in data [:events run-id]) []))
+              data
+              (assoc-in
+               (assoc data :event-sequence sequence)
+               [:events run-id]
+               (conj existing record))]
+          (recur (inc index) data (conj committed record)))))))
+
+(defn strip-outbox-state
+  [entry]
+  (dissoc
+   (dissoc
+    (dissoc
+     (dissoc
+      (dissoc
+       (dissoc entry :outbox/id)
+       :outbox/sequence)
+      :outbox/status)
+     :outbox/claim-id)
+    :outbox/claim)
+   :outbox/ack))
+
+(defn same-outbox-intent?
+  [existing proposed]
+  (= (strip-outbox-state existing)
+     (strip-outbox-state proposed)))
+
+(defn apply-outbox
+  [data run-id entries]
+  (let [entries (vec (or entries []))]
+    (loop [index 0
+           data data
+           committed []]
+      (if (= index (count entries))
+        [data committed]
+        (let [proposed
+              (merge {:outbox/run run-id
+                      :outbox/status :pending}
+                     (nth entries index)
+                     {:outbox/run run-id})
+              key (:outbox/key proposed)]
+          (if (nil? key)
+            (throw
+             (ex-info "Outbox entry requires :outbox/key"
+                      {:run/id run-id
+                       :outbox proposed})))
+          (let [existing-id (get-in data [:outbox-keys key])
+                existing (if existing-id
+                           (get-in data [:outbox existing-id])
+                           nil)]
+            (if existing
+              (if (same-outbox-intent? existing proposed)
+                (recur (inc index) data (conj committed existing))
+                (throw
+                 (ex-info "Outbox key conflicts with an existing intent"
+                          {:run/id run-id
+                           :outbox/key key})))
+              (let [sequence (inc (or (:outbox-sequence data) 0))
+                    id (or (:outbox/id proposed)
+                           (str "outbox-" sequence))
+                    record
+                    (assoc proposed
+                           :outbox/id id
+                           :outbox/sequence sequence)
+                    data
+                    (assoc
+                     (assoc-in
+                      (assoc-in
+                       (assoc data :outbox-sequence sequence)
+                       [:outbox id]
+                       record)
+                      [:outbox-keys key]
+                      id)
+                     :outbox-order
+                     (conj (vec (or (:outbox-order data) [])) id))]
+                (recur (inc index) data (conj committed record))))))))))
+
+(defn memory-commit-transition
+  [data transition]
+  (let [run-id (memory-validate-run-id (:transition/run-id transition))
+        run (get-in data [:runs run-id])]
+    (if (nil? run)
+      (throw (ex-info "Work run does not exist" {:run/id run-id})))
+    (assert-transition-revision! run transition)
+    (let [updates (canonical-run-updates (:transition/run-updates transition))
+          _ (assert-status-transition! run updates)
+          revision (inc (or (:run/revision run) 0))
+          committed-run
+          (assoc (merge run updates)
+                 :run/revision revision)
+          [data checkpoints]
+          (apply-checkpoints data
+                             run-id
+                             (:transition/checkpoints transition))
+          [data events]
+          (apply-events data
+                        run-id
+                        (:transition/events transition))
+          [data outbox]
+          (apply-outbox data
+                        run-id
+                        (:transition/outbox transition))
+          data (assoc-in data [:runs run-id] committed-run)
+          result
+          {:transition/run committed-run
+           :transition/revision revision
+           :transition/checkpoints checkpoints
+           :transition/events events
+           :transition/outbox outbox
+           :transition/event-sequences
+           (vec (map (fn [event] (:event/sequence event)) events))
+           :transition/outbox-sequences
+           (vec (map (fn [entry] (:outbox/sequence entry)) outbox))}]
+      (assoc data :last-transition result))))
+
+(defn memory-transact
+  [state transition]
+  (let [updated
         (swap! state
                (fn [data]
-                 (let [sequence (inc (or (:sequence data) 0))
-                       event (assoc event :event/sequence sequence)
-                       events (vec (or (get-in data [:events id]) []))]
-                   (assoc-in
-                    (assoc data :sequence sequence)
-                    [:events id]
-                    (conj events event)))))]
-    (let [events (get-in updated [:events id])]
-      (nth events (dec (count events))))))
+                 (memory-commit-transition data transition)))]
+    (:last-transition updated)))
+
+(defn current-transition
+  [state run-id changes]
+  (let [run (memory-load-run state run-id)]
+    (if (nil? run)
+      (throw (ex-info "Work run does not exist" {:run/id run-id})))
+    (memory-transact
+     state
+     (store/transition-request run-id
+                               (or (:run/revision run) 0)
+                               changes))))
+
+(defn memory-update-run
+  [state id updates]
+  (:transition/run
+   (current-transition state id {:transition/run-updates updates})))
+
+(defn memory-append-event
+  [state event]
+  (let [result
+        (current-transition
+         state
+         (:run/id event)
+         {:transition/events [event]})]
+    (first (:transition/events result))))
 
 (defn memory-list-events
   [state id]
@@ -85,63 +343,180 @@
 
 (defn memory-commit-checkpoint
   [state checkpoint]
-  (let [key (:checkpoint/key checkpoint)
-        updated
-        (swap! state
-               (fn [data]
-                 (let [existing (get-in data [:checkpoints key])]
-                   (if (= :completed (:checkpoint/status existing))
-                     data
-                     (let [sequence (inc (or (:sequence data) 0))
-                           checkpoint
-                           (assoc checkpoint
-                                  :checkpoint/sequence sequence)]
-                       (assoc-in
-                        (assoc data :sequence sequence)
-                        [:checkpoints key]
-                        checkpoint))))))]
-    (get-in updated [:checkpoints key])))
+  (let [result
+        (current-transition
+         state
+         (:checkpoint/run checkpoint)
+         {:transition/checkpoints [checkpoint]})]
+    (first (:transition/checkpoints result))))
 
 (defn memory-list-checkpoints
   [state id]
   (vec
-   (reduce
-    (fn [output checkpoint]
-      (if (= id (:checkpoint/run checkpoint))
-        (conj output checkpoint)
-        output))
-    []
-    (vals (:checkpoints (deref state))))))
+   (sort-by
+    (fn [checkpoint] (:checkpoint/sequence checkpoint))
+    (reduce
+     (fn [output checkpoint]
+       (if (= id (:checkpoint/run checkpoint))
+         (conj output checkpoint)
+         output))
+     []
+     (vals (:checkpoints (deref state)))))))
+
+(defn outbox-selected?
+  [entry query]
+  (and
+   (or (nil? (:run/id query))
+       (= (:run/id query) (:outbox/run entry)))
+   (or (nil? (:status query))
+       (= (:status query) (:outbox/status entry)))))
+
+(defn memory-list-outbox
+  [state query]
+  (let [data (deref state)]
+    (reduce
+     (fn [output id]
+       (let [entry (get-in data [:outbox id])]
+         (if (and entry (outbox-selected? entry (or query {})))
+           (conj output entry)
+           output)))
+     []
+     (vec (or (:outbox-order data) [])))))
+
+(defn claimed-by
+  [data claim-id]
+  (reduce
+   (fn [output id]
+     (let [entry (get-in data [:outbox id])]
+       (if (and (= :claimed (:outbox/status entry))
+                (= claim-id (:outbox/claim-id entry)))
+         (conj output entry)
+         output)))
+   []
+   (vec (or (:outbox-order data) []))))
+
+(defn claimable?
+  [entry options]
+  (and (= :pending (:outbox/status entry))
+       (or (nil? (:run/id options))
+           (= (:run/id options) (:outbox/run entry)))))
+
+(defn memory-claim-outbox
+  [state options]
+  (let [options (or options {})
+        limit (or (:limit options) 1)
+        updated
+        (swap! state
+               (fn [data]
+                 (let [claim-counter (inc (or (:claim-counter data) 0))
+                       claim-id (or (:claim/id options)
+                                    (str "claim-" claim-counter))
+                       existing (claimed-by data claim-id)]
+                   (if (not (empty? existing))
+                     (assoc data :last-claim existing)
+                     (let [[outbox claimed]
+                           (loop [index 0
+                                  outbox (:outbox data)
+                                  claimed []]
+                             (if (or (= index (count (vec (or (:outbox-order data) []))))
+                                     (>= (count claimed) limit))
+                               [outbox claimed]
+                               (let [id (nth (vec (:outbox-order data)) index)
+                                     entry (get outbox id)]
+                                 (if (claimable? entry options)
+                                   (let [record
+                                         (assoc entry
+                                                :outbox/status :claimed
+                                                :outbox/claim-id claim-id
+                                                :outbox/claim
+                                                (or (:claim/data options) {}))]
+                                     (recur (inc index)
+                                            (assoc outbox id record)
+                                            (conj claimed record)))
+                                   (recur (inc index) outbox claimed)))))]
+                       (assoc
+                        (assoc data
+                               :claim-counter claim-counter
+                               :outbox outbox)
+                        :last-claim claimed))))))]
+    (:last-claim updated)))
+
+(defn memory-ack-outbox
+  [state id options]
+  (let [options (or options {})
+        updated
+        (swap! state
+               (fn [data]
+                 (let [entry (get-in data [:outbox id])]
+                   (if (nil? entry)
+                     (throw
+                      (ex-info "Outbox entry does not exist"
+                               {:outbox/id id})))
+                   (if (and (:claim/id options)
+                            (:outbox/claim-id entry)
+                            (not= (:claim/id options)
+                                  (:outbox/claim-id entry)))
+                     (throw
+                      (ex-info "Outbox acknowledgement claim does not match"
+                               {:outbox/id id
+                                :claim/id (:claim/id options)
+                                :outbox/claim-id (:outbox/claim-id entry)})))
+                   (let [record
+                         (if (= :acked (:outbox/status entry))
+                           entry
+                           (assoc entry
+                                  :outbox/status :acked
+                                  :outbox/ack (or (:ack/data options) {})))]
+                     (assoc
+                      (assoc-in data [:outbox id] record)
+                      :last-ack record)))))]
+    (:last-ack updated)))
 
 (defn memory-backend
-  "Returns the legacy operation-map shape retained for compatibility."
+  "Returns the compatibility operation map backed by atomic transitions."
   []
-  (let [state (atom {:counter 0
-                     :sequence 0
-                     :runs {}
-                     :events {}
-                     :checkpoints {}})]
+  (let [state
+        (atom {:counter 0
+               :event-sequence 0
+               :checkpoint-sequence 0
+               :outbox-sequence 0
+               :claim-counter 0
+               :runs {}
+               :events {}
+               :checkpoints {}
+               :outbox {}
+               :outbox-keys {}
+               :outbox-order []})]
     {:state state
      :next-run-id (fn [] (memory-next-id state))
+     :validate-run-id memory-validate-run-id
      :create-run (fn [run] (memory-create-run state run))
      :load-run (fn [id] (memory-load-run state id))
-     :update-run (fn [id updates] (memory-update-run state id updates))
      :list-runs (fn [query] (memory-list-runs state query))
-     :append-event (fn [event] (memory-append-event state event))
+     :transact (fn [transition] (memory-transact state transition))
      :list-events (fn [id] (memory-list-events state id))
      :load-checkpoint (fn [key] (memory-load-checkpoint state key))
+     :list-checkpoints (fn [id] (memory-list-checkpoints state id))
+     :list-outbox (fn [query] (memory-list-outbox state query))
+     :claim-outbox (fn [options] (memory-claim-outbox state options))
+     :ack-outbox (fn [id options] (memory-ack-outbox state id options))
+
+     ;; Deprecated compatibility operations. They delegate to :transact so
+     ;; older callers cannot create a second non-atomic write path.
+     :update-run (fn [id updates] (memory-update-run state id updates))
+     :append-event (fn [event] (memory-append-event state event))
      :commit-checkpoint
-     (fn [checkpoint] (memory-commit-checkpoint state checkpoint))
-     :list-checkpoints (fn [id] (memory-list-checkpoints state id))}))
+     (fn [checkpoint] (memory-commit-checkpoint state checkpoint))}))
 
 (defn memory-store
-  "Returns the role-specific in-memory operational-store provider."
+  "Returns the reference operational-store provider."
   []
   (let [backend (memory-backend)]
     (store/normalise-provider
      {:provider/role :work/store
       :provider/id :memory
-      :provider/capabilities #{:runs :events :checkpoints}
+      :provider/capabilities
+      #{:runs :transactions :events :checkpoints :outbox}
       :provider/operations backend
       :provider/legacy backend
       :provider/state (:state backend)})))

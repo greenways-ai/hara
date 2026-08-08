@@ -8,7 +8,8 @@
 (def provider-store
   {:provider/role :work/store
    :provider/id :test-memory
-   :provider/capabilities #{:runs :events :checkpoints}
+   :provider/capabilities
+   #{:runs :transactions :events :checkpoints :outbox}
    :provider/operations provider-backend})
 
 (def executor-count (atom 0))
@@ -40,8 +41,8 @@
   (dissoc
    (dissoc
     (dissoc (work/memory-backend) :load-checkpoint)
-    :commit-checkpoint)
-   :list-checkpoints))
+    :list-checkpoints)
+   :transact))
 
 (def runs-only-store
   {:provider/role :work/store
@@ -60,6 +61,7 @@
      (:provider/id (runtime-base/runtime-executor provider-runtime))
      (:provider/role (runtime-base/runtime-receipt provider-runtime))
      (:provider/id (runtime-base/runtime-receipt provider-runtime))
+     (:run/revision (work/run-record provider-runtime provider-reference))
      (deref executor-count)]
     [:completed
      {:input 5 :work/id :provider-work}
@@ -69,11 +71,12 @@
      :test-executor
      :work/receipt
      :disabled
+     2
      1])
 
    (test/check-error
-    "durable runtimes require checkpoint-capable stores"
-    (work/durable-runtime {:store runs-only-store}))
+    "all runtimes require the atomic operational-store contract"
+    (work/local-runtime {:store runs-only-store}))
 
    (test/check-error
     "provider roles cannot be substituted accidentally"
