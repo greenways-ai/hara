@@ -20,13 +20,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - name: Add the machine child module
+      - name: Add the machine child module and explicit test path
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path('core/rust/src/vm/machine.rs')
-          text = path.read_text()
+          machine = Path('core/rust/src/vm/machine.rs')
+          text = machine.read_text()
           marker = '''#[cfg(feature = "bytecode-observation")]
           #[path = "machine/observation.rs"]
           pub mod observation;
@@ -40,11 +40,26 @@ jobs:
               if marker not in text:
                   raise SystemExit('machine observation marker not found')
               text = text.replace(marker, addition, 1)
-          path.write_text(text)
+          machine.write_text(text)
+
+          instrumentation = Path('core/rust/src/vm/machine/instrumentation.rs')
+          text = instrumentation.read_text()
+          marker = '#[cfg(test)]\nmod tests;'
+          replacement = '#[cfg(test)]\n#[path = "instrumentation/tests.rs"]\nmod tests;'
+          if replacement not in text:
+              if marker not in text:
+                  raise SystemExit('instrumentation test marker not found')
+              text = text.replace(marker, replacement, 1)
+          instrumentation.write_text(text)
           PY
       - name: Format and validate the focused instrumentation slice
         run: |
-          cargo fmt --manifest-path core/rust/Cargo.toml --all -- --check || cargo fmt --manifest-path core/rust/Cargo.toml --all
+          rustfmt --edition 2021 --config skip_children=true \
+            core/rust/src/vm.rs \
+            core/rust/src/vm/machine.rs
+          rustfmt --edition 2021 --config skip_children=true \
+            core/rust/src/vm/machine/instrumentation.rs \
+            core/rust/src/vm/machine/instrumentation/tests.rs
           cargo test --manifest-path core/rust/Cargo.toml \
             --features bytecode-instrumentation \
             vm::machine::instrumentation::tests
