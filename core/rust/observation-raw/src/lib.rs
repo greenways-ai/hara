@@ -1,29 +1,40 @@
-#[path = "../../src/core.rs"]
-mod core;
-#[path = "../../src/hta.rs"]
-mod hta;
+mod core {
+    pub use hara_wasm::core::*;
+
+    pub fn map_entries(value: &Value) -> Option<Vec<(Value, Value)>> {
+        match value {
+            Value::Map(values) => Some(
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            ),
+            Value::OrderedMap(values) => Some(
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+}
+
+mod lang {
+    pub use hara_wasm::lang::*;
+}
+
 #[path = "../../src/json.rs"]
 mod json;
-#[path = "../../src/kernel.rs"]
-mod kernel;
-#[path = "../../src/lang.rs"]
-mod lang;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "../../src/native_process.rs"]
-mod native_process;
-#[path = "../../src/snapshot.rs"]
-mod snapshot;
-#[path = "../../src/task.rs"]
-mod task;
-mod vm;
 
-use core::{PromiseState, Value};
-use lang::protocol::INamespaced;
+use core::Value;
+use hara_wasm::task::{PromiseRejection, PromiseState};
+use hara_wasm::vm::machine::observation::ObservationLimits;
+use hara_wasm::vm::session::{
+    BytecodeObservationSession, BytecodeSessionError, SessionRetentionLimits,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use task::PromiseRejection;
-use vm::machine::observation::ObservationLimits;
-use vm::session::{BytecodeObservationSession, SessionRetentionLimits};
 
 const ABI_VERSION: i32 = 1;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -31,33 +42,6 @@ const MAX_RUN_STEPS: usize = 100_000;
 const MAX_SNAPSHOT_ITEMS: usize = 4_096;
 const MAX_DISPLAY_CHARS: usize = 16_384;
 const MAX_RETAINED_ITEMS: usize = 100_000;
-
-/// Builds the same primitive namespace registry used by the public Hara
-/// embedding surface without retaining an application evaluator session.
-pub fn embedding_namespace_registry() -> kernel::NamespaceRegistry<Value> {
-    let namespaces = kernel::NamespaceRegistry::new("user");
-    let foundation = namespaces.find_or_create("std.foundation");
-    for (name, value) in core::exception_function_values() {
-        foundation.intern(name, value);
-    }
-    for (name, protocol) in core::foundation_protocol_values() {
-        foundation.intern(&name, protocol.clone());
-        namespaces
-            .find_or_create(core::builtin_protocol_namespace(&name))
-            .intern(name, protocol);
-    }
-    for (namespace, name, method) in core::builtin_protocol_method_values() {
-        namespaces.find_or_create(namespace).intern(name, method);
-    }
-    for (name, descriptor) in core::native_type_values() {
-        let canonical_name = format!("std.native.{name}");
-        let var = foundation.intern(&canonical_name, descriptor);
-        foundation.map_var(lang::data::Symbol::parse(&name), var);
-        namespaces.find_or_create(canonical_name);
-    }
-    core::refer_startup_defaults(&namespaces, "user");
-    namespaces
-}
 
 struct ObservationRuntime {
     next_handle: u64,
@@ -323,7 +307,7 @@ fn error_code(message: &str) -> &'static str {
     }
 }
 
-fn session_error(error: vm::session::BytecodeSessionError) -> String {
+fn session_error(error: BytecodeSessionError) -> String {
     error.message().into()
 }
 
