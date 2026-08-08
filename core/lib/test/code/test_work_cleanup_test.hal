@@ -14,6 +14,10 @@
    0
    events))
 
+(defn event-kinds
+  [events]
+  (vec (map (fn [event] (:event event)) events)))
+
 (def lifecycle (atom []))
 (def reporter (fact/event-reporter))
 
@@ -154,7 +158,7 @@
     [(:status scoped-summary)
      scoped-order
      (count scoped-checkpoints)
-     (vec (map :event scoped-events))
+     (event-kinds scoped-events)
      (event-count scoped-history :test/run-started)
      (event-count scoped-history :test/fact-started)
      (event-count scoped-history :test/fact-completed)
@@ -176,7 +180,7 @@
     [(= (:run/id (work/run-record scoped-runtime scoped-reference))
         (:run/id (work/run-record scoped-runtime same-scoped-reference)))
      replay-order
-     (vec (map :event replay-events))]
+     (event-kinds replay-events)]
     [true
      [:before-all
       :before-each
