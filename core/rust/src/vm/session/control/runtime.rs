@@ -1,9 +1,10 @@
 use crate::core::{PromiseState, Value};
+use crate::kernel::NamespaceRegistry;
 
 use crate::vm::machine::observation::{ObservedStep, ObservedStepOutcome};
 use super::super::{
-    evidence, fresh_registry, BytecodeObservationSession, BytecodeSessionError,
-    BytecodeSessionStatus, CompactEventRecord, SessionMetrics, TraceStepRecord,
+    evidence, BytecodeObservationSession, BytecodeSessionError, BytecodeSessionStatus,
+    CompactEventRecord, SessionMetrics, TraceStepRecord,
 };
 use super::cancel_pending;
 
@@ -140,7 +141,11 @@ impl BytecodeObservationSession {
         cancel_pending(self.suspension.take());
         self.machine = None;
         self.program = None;
-        self.registry = fresh_registry();
+        // Disposal must remain safe during thread-local teardown. Rebuilding the
+        // full embedding registry can touch other TLS caches after destruction
+        // has begun, while an empty registry releases the retained namespace
+        // graph without invoking any runtime bootstrap path.
+        self.registry = NamespaceRegistry::new("user");
         self.source = None;
         self.result = None;
         self.error = None;
