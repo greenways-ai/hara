@@ -1,7 +1,7 @@
 (ns code.deploy-test
   (:require [code.deploy :as deploy]
-            [std.lib.task :as task]
-            [std.lib.test :as test]))
+            [std.lib.test :as test]
+            [std.work :as work]))
 
 (def +packages+
   {'greenways/hodos-core {:path "packages/core"}
@@ -9,6 +9,26 @@
    {:path "packages/addon-authoring"
     :depends ['greenways/hodos-core]
     :options {:output "target/hodos-authoring.harp"}}})
+
+(defn record-packages
+  [records]
+  (loop [index 0
+         output []]
+    (if (= index (count records))
+      output
+      (recur (inc index)
+             (conj output (:package (nth records index)))))))
+
+(defn checkpoint-item-ids
+  [checkpoints]
+  (loop [index 0
+         output []]
+    (if (= index (count checkpoints))
+      output
+      (recur (inc index)
+             (conj output
+                   (:checkpoint/item-id
+                    (nth checkpoints index)))))))
 
 (def results
   [(test/check
@@ -23,31 +43,104 @@
       "--output" "target/core.harp"]
      ["./hara" "package" "publish" "--tap" "hara"
       "--dry-run" "packages/core"]])
+
    (test/check
-    "deployment tasks select package catalogs and use an injected runner"
+    "deployment operations are native work values"
+    (let [spec (work/work-spec deploy/package)
+          batch (work/work-spec (nth (:children spec) 1))]
+      [(:op spec)
+       (:id spec)
+       (:op batch)
+       (:id batch)])
+    [:chain 'code.deploy/package :batch :deploy/packages])
+
+   (test/check
+    "deployment work uses stable package checkpoints and context capabilities"
     (let [commands (atom [])
           runner (fn [argv options]
                    (do
                      (swap! commands conj argv)
                      {:command argv :exit 0 :stdout "ok" :stderr ""}))
-          output (task/invoke
-                  deploy/package
-                  :all
-                  {:packages +packages+
-                   :executable "./hara"
-                   :runner runner
-                   :return :all
-                   :package :records})]
-      [(deref commands)
+          runtime (work/durable-runtime)
+          reference
+          (work/start
+           runtime
+           deploy/package
+           {:selector :all
+            :packages +packages+
+            :executable "./hara"}
+           {:id "deploy-package-1"
+            :context {:process/run runner}})
+          output (work/result runtime reference)
+          checkpoints (work/checkpoints runtime reference)]
+      [(work/status runtime reference)
+       (deref commands)
        (get-in output [:summary :items])
        (get-in output [:summary :errors])
-       (vec (sort (keys (:results output))))])
-    [[ ["./hara" "package" "build" "packages/core"]
-       ["./hara" "package" "build" "packages/addon-authoring"
-        "--output" "target/hodos-authoring.harp"]]
+       (vec (sort (record-packages (:records output))))
+       (vec (sort (checkpoint-item-ids checkpoints)))])
+    [:completed
+     [["./hara" "package" "build" "packages/core"]
+      ["./hara" "package" "build" "packages/addon-authoring"
+       "--output" "target/hodos-authoring.harp"]]
      2
      0
+     '[greenways/hodos-authoring greenways/hodos-core]
      '[greenways/hodos-authoring greenways/hodos-core]])
+
+   (test/check
+    "package command failures remain completed deployment results"
+    (let [runner
+          (fn [argv options]
+            (if (= "packages/addon-authoring" (nth argv 3))
+              (throw (ex-info "package failed" {:command argv :exit 1}))
+              {:command argv :exit 0 :stdout "ok" :stderr ""}))
+          runtime (work/durable-runtime)
+          reference
+          (work/start
+           runtime
+           deploy/package
+           {:selector :all
+            :packages +packages+
+            :executable "./hara"}
+           {:id "deploy-package-error"
+            :context {:process/run runner}})
+          output (work/result runtime reference)]
+      [(work/status runtime reference)
+       (get-in output [:summary :items])
+       (get-in output [:summary :results])
+       (get-in output [:summary :errors])
+       (record-packages (:records output))
+       (:package (first (:errors output)))])
+    [:completed
+     2
+     1
+     1
+     ['greenways/hodos-core 'greenways/hodos-authoring]
+     'greenways/hodos-authoring])
+
+   (test/check
+    "deployment selectors remain data-first"
+    (let [commands (atom [])
+          runner (fn [argv options]
+                   (do
+                     (swap! commands conj argv)
+                     {:command argv :exit 0 :stdout "ok" :stderr ""}))
+          output
+          (work/run
+           (work/local-runtime)
+           deploy/check
+           {:selector 'greenways/hodos-core
+            :packages +packages+
+            :executable "./hara"}
+           {:context {:process/run runner}})]
+      [(deref commands)
+       (:items output)
+       (record-packages (:records output))])
+    [[ ["./hara" "package" "check" "packages/core"]]
+     ['greenways/hodos-core]
+     ['greenways/hodos-core]])
+
    (test/check
     "package catalogs reject dependency cycles"
     (try
@@ -58,6 +151,7 @@
         false)
       (catch Throwable error true))
     true)
+
    (test/check
     "package catalog entries normalize to roots"
     [(deploy/package-root "packages/core")
