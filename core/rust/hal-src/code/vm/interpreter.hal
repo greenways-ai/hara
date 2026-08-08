@@ -216,26 +216,26 @@
    (create input journal {}))
   ([input journal options]
    (let [options (map-value "options" (or options {}))
-         journal (normalize-journal journal)
+         normalized-journal (normalize-journal journal)
          source-options
          (map-value "source options"
                     (or (:source options) {}))
          source-index
          (source/index input source-options)
-         journal
-         (validate-event-sources source-index journal)
+         validated-journal
+         (validate-event-sources source-index normalized-journal)
          adapter-options
          (merge
           (map-value "adapter options"
                      (or (:options options) {}))
-          {:journal journal
+          {:journal validated-journal
            :source/index source-index})]
      (model/machine
       :interpreter
       input
       {:id (or (:id options)
-               (str "vm/interpreter/" (:journal/id journal)))
-       :state (initial-state journal options)
+               (str "vm/interpreter/" (:journal/id validated-journal)))
+       :state (initial-state validated-journal options)
        :options adapter-options
        :limits (:limits options)}))))
 
