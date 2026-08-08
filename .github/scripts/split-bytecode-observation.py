@@ -103,7 +103,7 @@ machine = machine.replace(old_docs, new_docs, 1)
 machine_path.write_text(machine)
 
 # Re-export directly from the now-public observation child module.
-vm_path = root / "vm.rs"
+vm_path = Path("core/rust/src/vm.rs")
 vm = vm_path.read_text()
 old_export = '''#[cfg(feature = "bytecode-observation")]
 pub use machine::{
