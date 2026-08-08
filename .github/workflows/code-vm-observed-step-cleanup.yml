@@ -1,0 +1,39 @@
+name: Remove temporary observed-step workflows
+
+on:
+  push:
+    branches: [agent/code-vm-observed-step]
+    paths:
+      - ".github/workflows/code-vm-observed-step-cleanup.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/code-vm-observed-step
+          fetch-depth: 0
+
+      - name: Remove temporary validation files
+        run: |
+          git rm -f \
+            .github/workflows/code-vm-observed-step.yml \
+            .github/workflows/code-vm-observed-step-retry.yml \
+            .github/workflows/code-vm-observed-step-final.yml \
+            .github/workflows/code-vm-observed-step-stage.yml \
+            .github/workflows/code-vm-observed-step-fix.yml \
+            .github/workflows/code-vm-observed-step-final-fix.yml \
+            .github/workflows/code-vm-observed-step-finalize.yml \
+            .github/workflows/code-vm-observed-step-cleanup.yml \
+            .github/scripts/fix-observed-step-tests.py
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Remove temporary observed-step validation workflows"
+          git push
