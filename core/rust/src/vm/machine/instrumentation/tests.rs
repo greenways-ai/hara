@@ -1,7 +1,8 @@
 use super::*;
+use crate::core::Value;
 use crate::vm::program::{FunctionPrototype, Program};
 use crate::vm::source_map::SourceMap;
-use crate::vm::{compile_source, validate};
+use crate::vm::{compile_source, validate, Instruction, Machine, VmOutcome};
 use std::rc::Rc;
 
 fn machine(source: &str) -> Machine {
