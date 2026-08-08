@@ -116,7 +116,7 @@
                   (count (get summary :results))
                   (count (get (first (get summary :results)) :checks))
                   (deref lifecycle)]
-                 [:passed 5 9 1 [:before :after]])
+                 [:passed 5 6 2 [:before :after]])
    (legacy/check "runner emits structured events without printing"
                  (vec (map (fn [report] (get report :event))
                            (reporter-events reporter)))

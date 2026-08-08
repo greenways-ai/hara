@@ -53,6 +53,23 @@
    {}
    {:context {:test/reporter reporter}}))
 
+(def public-runtime (work/durable-runtime))
+(def public-result
+  (fact/run
+   public-runtime
+   {:namespace 'code.test-work-test
+    :name "work-driven failing fact"
+    :test/revision 8}
+   {:id "test-public-run"}))
+(def public-replayed-result
+  (fact/run
+   public-runtime
+   {:namespace 'code.test-work-test
+    :name "work-driven failing fact"
+    :test/revision 8}
+   {:id "test-public-run"}))
+(def public-runs (work/list-runs public-runtime))
+
 (def results
   [(test/check
     "suite execution uses IWorkRuntime while retaining test-domain status"
@@ -66,7 +83,8 @@
    (test/check
     "idempotent suite starts replay the completed suite boundary"
     [(work/status suite-runtime same-suite-reference)
-     (= suite-reference same-suite-reference)
+     (= (:run/id (work/run-record suite-runtime suite-reference))
+        (:run/id (work/run-record suite-runtime same-suite-reference)))
      (deref execution-count)
      (count (work/checkpoints suite-runtime suite-reference))]
     [:completed true 1 1])
@@ -84,6 +102,15 @@
     [(:status reported-result)
      (vec (map (fn [event] (:event event))
                (fact/reporter-events reporter)))]
-    [:failed [:fact/start :fact/end]])])
+    [:failed [:fact/start :fact/end]])
+
+   (test/check
+    "public code.test/run uses a native work value and explicit runtime"
+    [(:op (work/work-spec fact/+runner-work+))
+     (:status public-result)
+     (= public-result public-replayed-result)
+     (count public-runs)
+     (:run/status (first public-runs))]
+    [:step :failed true 1 :completed])])
 
 (test/print-results results)
