@@ -101,6 +101,13 @@ jobs:
           bash core/rust/scripts/check-layout.test.sh
           bash core/rust/scripts/check-layout.sh
 
+      - name: Run focused code.vm HAL tests
+        if: steps.scope.outputs.run_core == 'true'
+        run: |
+          ./packaging/scripts/run-lib-tests \
+            core/lib/test/code/vm/source_test.hal \
+            core/lib/test/code/vm/interpreter_test.hal
+
       - name: Check Rust
         if: steps.scope.outputs.run_core == 'true'
         run: |
