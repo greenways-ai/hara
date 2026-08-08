@@ -14,6 +14,14 @@
 //!                       per call through the isolated VM API used by issues
 //!                       #195 and #202.
 //! - `execute-only`    — compile once; execute + display per call.
+//! - `execute-feature-enabled` — the same ordinary execution API, intended
+//!                       to run in a build that also compiles instrumentation.
+//! - `execute-instrumented-noop` — compile once; execute through `NoProbe`.
+//! - `execute-counted` — compile once; collect aggregate counters.
+//! - `execute-sampled` — compile once; sample instructions while retaining
+//!                       all control-flow and terminal boundaries.
+//! - `execute-events`  — compile once; retain a fixed-capacity event ring.
+//! - `execute-observed` — compile once; execute through full snapshots.
 //! - `runtime-compile-execute` — compile and execute through a `Runtime`,
 //!                       including namespace compatibility synchronization.
 //! - `runtime-execute` — compile once against a `Runtime`; execute through
@@ -53,6 +61,12 @@ fn main() {
         "existing" => "hara-rust-existing",
         "compile-execute" => "hara-rust-bytecode-compile-execute",
         "execute-only" => "hara-rust-bytecode-execute-only",
+        "execute-feature-enabled" => "hara-rust-bytecode-feature-enabled",
+        "execute-instrumented-noop" => "hara-rust-bytecode-instrumented-noop",
+        "execute-counted" => "hara-rust-bytecode-counted",
+        "execute-sampled" => "hara-rust-bytecode-sampled",
+        "execute-events" => "hara-rust-bytecode-events",
+        "execute-observed" => "hara-rust-bytecode-observed",
         "runtime-compile-execute" => "hara-rust-bytecode-runtime-compile-execute",
         "runtime-execute" => "hara-rust-bytecode-runtime-execute",
         "runtime-registry-execute" => "hara-rust-bytecode-runtime-registry-execute",
@@ -67,9 +81,15 @@ fn main() {
 
     let mut runtime = Runtime::new();
     let prepare_started = Instant::now();
-    // For execute-only the program is compiled once, outside the samples.
+    // Execute-only and observability modes compile once, outside the samples.
     let program = match mode.as_str() {
-        "execute-only" => {
+        "execute-only"
+        | "execute-feature-enabled"
+        | "execute-instrumented-noop"
+        | "execute-counted"
+        | "execute-sampled"
+        | "execute-events"
+        | "execute-observed" => {
             Some(hara_wasm::compile_bytecode(&source).unwrap_or_else(|error| fail(id, &error)))
         }
         "runtime-execute" | "runtime-registry-execute" => Some(
@@ -98,6 +118,12 @@ fn main() {
     let mut native: Option<()> = None;
     let prepare_ns = match mode.as_str() {
         "execute-only"
+        | "execute-feature-enabled"
+        | "execute-instrumented-noop"
+        | "execute-counted"
+        | "execute-sampled"
+        | "execute-events"
+        | "execute-observed"
         | "runtime-execute"
         | "runtime-registry-execute"
         | "halc-execute"
@@ -108,7 +134,16 @@ fn main() {
         let value = match mode.as_str() {
             "existing" => runtime.eval_native(&source),
             "compile-execute" => hara_wasm::eval_bytecode_native(&source),
-            "execute-only" => hara_wasm::execute_bytecode(program.as_ref().expect("program")),
+            "execute-only" | "execute-feature-enabled" => {
+                hara_wasm::execute_bytecode(program.as_ref().expect("program"))
+            }
+            "execute-instrumented-noop"
+            | "execute-counted"
+            | "execute-sampled"
+            | "execute-events" => {
+                execute_instrumented(program.as_ref().expect("program"), mode)
+            }
+            "execute-observed" => execute_observed(program.as_ref().expect("program")),
             "runtime-compile-execute" => runtime.eval_bytecode_native(&source),
             "runtime-execute" => {
                 runtime.execute_compiled_bytecode(program.as_ref().expect("program").clone())
@@ -184,6 +219,94 @@ fn main() {
         samples,
         telemetry,
     );
+}
+
+#[cfg(feature = "bytecode-instrumentation")]
+fn execute_instrumented(
+    program: &std::rc::Rc<hara_wasm::vm::Program>,
+    mode: &str,
+) -> Result<String, String> {
+    use hara_wasm::vm::{CounterProbe, EventRing, Machine, NoProbe, SampledProbe};
+    use std::hint::black_box;
+
+    let mut machine = Machine::entry(program.clone());
+    let outcome = match mode {
+        "execute-instrumented-noop" => {
+            let mut probe = NoProbe;
+            machine.run_instrumented(&mut probe)
+        }
+        "execute-counted" => {
+            let mut probe = CounterProbe::default();
+            let outcome = machine.run_instrumented(&mut probe);
+            black_box((
+                probe.metrics().instructions,
+                probe.metrics().max_stack_depth,
+                probe.metrics().max_call_depth,
+            ));
+            outcome
+        }
+        "execute-sampled" => {
+            let mut probe = SampledProbe::new(EventRing::with_capacity(256), 64);
+            let outcome = machine.run_instrumented(&mut probe);
+            black_box((probe.inner().len(), probe.inner().dropped()));
+            outcome
+        }
+        "execute-events" => {
+            let mut probe = EventRing::with_capacity(256);
+            let outcome = machine.run_instrumented(&mut probe);
+            black_box((probe.len(), probe.dropped()));
+            outcome
+        }
+        _ => return Err(format!("unknown instrumented mode: {mode}")),
+    };
+    display_outcome(outcome)
+}
+
+#[cfg(not(feature = "bytecode-instrumentation"))]
+fn execute_instrumented(
+    _program: &std::rc::Rc<hara_wasm::vm::Program>,
+    mode: &str,
+) -> Result<String, String> {
+    Err(format!(
+        "{mode} requires the bytecode-instrumentation feature"
+    ))
+}
+
+#[cfg(feature = "bytecode-observation")]
+fn execute_observed(
+    program: &std::rc::Rc<hara_wasm::vm::Program>,
+) -> Result<String, String> {
+    use hara_wasm::vm::{Machine, ObservedStepOutcome};
+
+    let mut machine = Machine::entry(program.clone());
+    loop {
+        match machine.step_observed().outcome {
+            ObservedStepOutcome::Continue => {}
+            ObservedStepOutcome::Returned(value) => return Ok(value.display()),
+            ObservedStepOutcome::Failed(error) => return Err(error.to_string()),
+            ObservedStepOutcome::Suspended(_) => {
+                return Err("observed benchmark suspended".into())
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "bytecode-observation"))]
+fn execute_observed(
+    _program: &std::rc::Rc<hara_wasm::vm::Program>,
+) -> Result<String, String> {
+    Err("execute-observed requires the bytecode-observation feature".into())
+}
+
+#[cfg(feature = "bytecode-instrumentation")]
+fn display_outcome(outcome: hara_wasm::vm::VmOutcome) -> Result<String, String> {
+    match outcome {
+        hara_wasm::vm::VmOutcome::Returned(value) => Ok(value.display()),
+        hara_wasm::vm::VmOutcome::Failed(error) => Err(error.to_string()),
+        hara_wasm::vm::VmOutcome::Suspended(_) => {
+            Err("instrumented benchmark suspended".into())
+        }
+    }
 }
 
 #[cfg(feature = "halc-encoder")]
