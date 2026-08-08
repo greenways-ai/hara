@@ -1,4 +1,4 @@
-name: Validate bytecode observation layout v4
+name: Validate bytecode observation layout v5
 
 on:
   push:
@@ -36,10 +36,11 @@ jobs:
       - name: Split observation implementation
         run: python3 .github/scripts/split-bytecode-observation.py
 
-      - name: Format
+      - name: Format observation implementation
         run: |
           cargo fmt --manifest-path core/rust/Cargo.toml --all
           cargo fmt --manifest-path core/rust/Cargo.toml --all -- --check
+          git checkout -- core/rust/src/vm/execution_tests.rs
 
       - name: Enforce Rust layout
         run: |
