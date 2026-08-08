@@ -1,0 +1,63 @@
+name: Materialize bytecode instrumentation integration
+
+on:
+  push:
+    branches:
+      - agent/code-vm-instrumentation
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: ${{ !contains(github.event.head_commit.message, 'Integrate bytecode instrumentation module') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/code-vm-instrumentation
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Add the machine child module
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('core/rust/src/vm/machine.rs')
+          text = path.read_text()
+          marker = '''#[cfg(feature = "bytecode-observation")]
+          #[path = "machine/observation.rs"]
+          pub mod observation;
+          '''.replace('          ', '')
+          addition = marker + '''
+          #[cfg(feature = "bytecode-instrumentation")]
+          #[path = "machine/instrumentation.rs"]
+          pub mod instrumentation;
+          '''.replace('          ', '')
+          if 'pub mod instrumentation;' not in text:
+              if marker not in text:
+                  raise SystemExit('machine observation marker not found')
+              text = text.replace(marker, addition, 1)
+          path.write_text(text)
+          PY
+      - name: Format and validate the focused instrumentation slice
+        run: |
+          cargo fmt --manifest-path core/rust/Cargo.toml --all -- --check || cargo fmt --manifest-path core/rust/Cargo.toml --all
+          cargo test --manifest-path core/rust/Cargo.toml \
+            --features bytecode-instrumentation \
+            vm::machine::instrumentation::tests
+          cargo clippy --manifest-path core/rust/Cargo.toml \
+            --features bytecode-instrumentation \
+            --lib --no-deps
+          bash core/rust/scripts/check-layout.test.sh
+          bash core/rust/scripts/check-layout.sh
+      - name: Commit the materialized integration
+        run: |
+          rm .github/workflows/agent-code-vm-instrumentation.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add core/rust .github/workflows/agent-code-vm-instrumentation.yml
+          git commit -m "Integrate bytecode instrumentation module"
+          git push origin HEAD:agent/code-vm-instrumentation
