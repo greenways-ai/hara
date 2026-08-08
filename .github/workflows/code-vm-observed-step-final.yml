@@ -1,0 +1,88 @@
+name: Finalize observed bytecode stepping
+
+on:
+  push:
+    branches: [agent/code-vm-observed-step]
+    paths:
+      - ".github/workflows/code-vm-observed-step-final.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/code-vm-observed-step
+          fetch-depth: 0
+
+      - name: Checkout hara-specs-registry
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-specs-registry
+          path: hara-specs-registry
+          fetch-depth: 1
+
+      - name: Place specs where existing compile-time fixtures expect them
+        shell: bash
+        run: |
+          expected="$GITHUB_WORKSPACE/../hara-specs-registry"
+          rm -rf "$expected"
+          ln -s "$GITHUB_WORKSPACE/hara-specs-registry" "$expected"
+          test -f "$expected/01-lang/010-bytecode/draft/conformance/bytecode-vm.edn"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Materialize the observation implementation
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/code-vm-observed-step.yml").read_text()
+          opening = "          python3 - <<'PYCODE'\n"
+          closing = "\n          PYCODE\n"
+          start = workflow.index(opening) + len(opening)
+          end = workflow.index(closing, start)
+          block = workflow[start:end]
+          lines = block.splitlines()
+          assert lines and all(line.startswith("          ") or not line for line in lines)
+          materializer = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in lines
+          ) + "\n"
+          Path("/tmp/materialize-observation.py").write_text(materializer)
+          PYCODE
+
+          python3 /tmp/materialize-observation.py
+          cargo fmt --manifest-path core/rust/Cargo.toml --all
+          cargo fmt --manifest-path core/rust/Cargo.toml --all -- --check
+
+      - name: Run observed stepping tests
+        run: |
+          cargo test --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            vm::machine::observation::tests
+
+      - name: Check the observation-enabled library
+        run: |
+          cargo clippy --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            --lib --no-deps
+
+      - name: Commit materialized implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add core/rust/Cargo.toml \
+                  core/rust/src/vm.rs \
+                  core/rust/src/vm/frame.rs \
+                  core/rust/src/vm/machine.rs \
+                  core/rust/src/vm/machine/observation.rs
+          git commit -m "Expose observed bytecode machine steps"
+          git push
