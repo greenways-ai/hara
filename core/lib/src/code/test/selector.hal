@@ -1,0 +1,42 @@
+;; Test selection is a code.test concern. It is intentionally independent of
+;; std.work and the deprecated std.lib.task compatibility facade.
+(ns code.test.selector
+  (:require [std.foundation.string :as string]))
+
+(defn matches?
+  "Matches one test selector against a namespace, fact name, tag, or other
+   identifier. Lists are conjunctions and vectors are disjunctions."
+  [selector identifier]
+  (cond
+    (nil? selector)
+    true
+
+    (fn? selector)
+    (if (selector identifier) true false)
+
+    (or (string? selector) (symbol? selector) (keyword? selector))
+    (string/starts-with? (str identifier) (str selector))
+
+    (set? selector)
+    (reduce (fn [matched value]
+              (or matched (= value identifier)))
+            false
+            selector)
+
+    (list? selector)
+    (reduce (fn [matched part]
+              (and matched (matches? part identifier)))
+            true
+            selector)
+
+    (vector? selector)
+    (reduce (fn [matched part]
+              (or matched (matches? part identifier)))
+            false
+            selector)
+
+    :else
+    (throw
+     (ex-info "Test selector is not valid"
+              {:selector selector
+               :identifier identifier}))))
