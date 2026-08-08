@@ -343,8 +343,8 @@
 
 (extend-type std.work.runtime.base/Runtime protocol/IWorkRuntime
   (-start [runtime work input options]
-    (start-run runtime work input options))
+    (std.work.runtime.lifecycle/start-run runtime work input options))
   (-query [runtime reference options]
-    (query-run runtime reference options))
+    (std.work.runtime.lifecycle/query-run runtime reference options))
   (-command [runtime reference command options]
-    (command-run runtime reference command options)))
+    (std.work.runtime.lifecycle/command-run runtime reference command options)))

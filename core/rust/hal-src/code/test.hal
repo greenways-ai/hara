@@ -899,11 +899,11 @@
    The one-argument form preserves local in-process execution. Additional arities
    accept an explicit runtime and work options for durable IDs, observers, and
    runtime context capabilities."
-  ([] (run {}))
+  ([] (code.test/run {}))
   ([selector-or-options]
-   (run (work/local-runtime) selector-or-options {}))
+   (code.test/run (work/local-runtime) selector-or-options {}))
   ([runtime selector-or-options]
-   (run runtime selector-or-options {}))
+   (code.test/run runtime selector-or-options {}))
   ([runtime selector-or-options work-options]
    (let [options (normalize-run-options selector-or-options)]
      (work/run runtime
