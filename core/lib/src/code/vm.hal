@@ -1,7 +1,8 @@
 (ns code.vm
   (:require [code.vm.model :as model]
             [code.vm.source :as source]
-            [code.vm.interpreter :as interpreter]))
+            [code.vm.interpreter :as interpreter]
+            [code.vm.halc :as halc]))
 
 (def kinds model/+vm-kinds+)
 (def statuses model/+vm-statuses+)
@@ -35,3 +36,13 @@
 (def interpreter-step interpreter/step)
 (def interpreter-run interpreter/run)
 (def interpreter-from-journal interpreter/from-journal)
+
+(def halc-trace-schema halc/+trace-schema+)
+(def halc-stages halc/+stages+)
+(def halc-trace? halc/trace?)
+(def halc-machine? halc/halc-machine?)
+(def halc-create halc/create)
+(def halc-source-index halc/source-index)
+(def halc-step halc/step)
+(def halc-run halc/run)
+(def halc-from-trace halc/from-trace)
