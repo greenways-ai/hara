@@ -1,5 +1,6 @@
 (ns std.work
-  (:require [std.work.protocol :as protocol]
+  (:require [std.foundation :refer :all :exclude [filter]]
+            [std.work.protocol :as protocol]
             [std.work.runtime :as runtime]))
 
 
