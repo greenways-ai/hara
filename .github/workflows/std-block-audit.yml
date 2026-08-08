@@ -12,5 +12,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Reject removed std.lib.block namespaces and paths
+      - name: Reject retired block namespaces and source paths
         run: bash scripts/audit-std-block-hard-cut.sh
