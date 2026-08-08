@@ -177,7 +177,7 @@
     [[[2]
       "(defn ^{:schema #'Customer} customer-id [customer]\n  (:id customer))"]
      [[1]
-      "(def Customer [:map [:id :int])"]]])
+      "(def Customer [:map [:id :int]])"]])
 
    (test/check
     "invalid artifacts fail at their precise HALC stage"
