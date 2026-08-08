@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+MANIFEST="$ROOT/core/rust/observation-raw/Cargo.toml"
+PROFILE=${HARA_OBSERVATION_PROFILE:-browser-release}
+TARGET=${HARA_OBSERVATION_TARGET:-wasm32-unknown-unknown}
+TARGET_DIR="$ROOT/core/rust/observation-raw/target"
+WASM="$TARGET_DIR/$TARGET/$PROFILE/hara_bytecode_observation_raw.wasm"
+
+cargo build \
+  --manifest-path "$MANIFEST" \
+  --target "$TARGET" \
+  --profile "$PROFILE"
+
+test -s "$WASM"
+echo "$WASM"
