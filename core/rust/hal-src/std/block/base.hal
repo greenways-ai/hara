@@ -1,6 +1,6 @@
-(ns std.lib.block.base
-  (:require [std.lib.block.protocol :as protocol]
-            [std.lib.block.type :as type]
+(ns std.block.base
+  (:require [std.block.protocol :as protocol]
+            [std.block.type :as type]
             [std.foundation.string :as string]))
 
 (defn block? [value] (type/block? value))

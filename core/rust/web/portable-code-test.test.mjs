@@ -88,7 +88,7 @@ test("portable blocks preserve source, value, and structure through browser wasm
   const runtime = new Runtime();
   const result = runtime.eval(
     "(ns std-block-browser-probe" +
-      " (:require [std.lib.block :as block]))" +
+      " (:require [std.block :as block]))" +
       ' (let [parsed (block/parse-string "[1 2 3]")' +
       '       first-block (block/parse-first "[1 2 3]")' +
       "       spaces (block/spaces 3)]" +

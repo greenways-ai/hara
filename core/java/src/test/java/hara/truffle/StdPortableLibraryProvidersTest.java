@@ -21,7 +21,7 @@ public class StdPortableLibraryProvidersTest {
             .collect(Collectors.toSet());
 
     assertFalse(namespaces.contains("std.lib.zip"));
-    assertFalse(namespaces.contains("std.lib.block"));
+    assertFalse(namespaces.contains("std.block"));
     assertFalse(namespaces.contains("std.lib.task"));
     assertFalse(namespaces.contains("std.logic.kanren"));
     assertFalse(namespaces.contains("code.test"));
@@ -38,7 +38,7 @@ public class StdPortableLibraryProvidersTest {
                   HaraLanguage.ID,
                   "(ns portable.provider-probe "
                       + "(:require [std.lib.zip :as zip] "
-                      + "[std.lib.block :as block] "
+                      + "[std.block :as block] "
                       + "[std.lib.task :as task] "
                       + "[code.test :as test])) "
                       + "(task/deftask double-task "

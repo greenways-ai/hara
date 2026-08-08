@@ -1,6 +1,6 @@
-(ns std.lib.block.editor
-  (:require [std.lib.block.zip :as block-zip]
-            [std.lib.block.construct :as construct]
+(ns std.block.editor
+  (:require [std.block.zip :as block-zip]
+            [std.block.construct :as construct]
             [std.lib.zip :as zip]))
 
 (defn create [block] (block-zip/block-zip block))

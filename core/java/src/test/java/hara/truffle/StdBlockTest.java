@@ -5,7 +5,7 @@ import static org.junit.Assert.assertEquals;
 import org.graalvm.polyglot.Context;
 import org.junit.Test;
 
-public class StdLibBlockTest {
+public class StdBlockTest {
   @Test
   public void providerPreservesSourceValuesAndPersistentEdits() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
@@ -15,7 +15,7 @@ public class StdLibBlockTest {
               .eval(
                   HaraLanguage.ID,
                   "(ns std-lib-block-truffle-probe "
-                      + "(:require [std.lib.block :as block] "
+                      + "(:require [std.block :as block] "
                       + "          [std.lib.zip :as zip])) "
                       + "(let [original (block/parse-first \"[1 #_2 3]\") "
                       + "      location (zip/step-right "

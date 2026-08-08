@@ -1,7 +1,7 @@
-(ns std.lib.block.grid
-  (:require [std.lib.block.type :as type]
-            [std.lib.block.base :as base]
-            [std.lib.block.construct :as construct]
+(ns std.block.grid
+  (:require [std.block.type :as type]
+            [std.block.base :as base]
+            [std.block.construct :as construct]
             [std.foundation.string :as string]))
 
 (def bind-length 2)

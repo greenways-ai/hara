@@ -1,4 +1,4 @@
-(ns std.lib.block.check
+(ns std.block.check
   (:require [std.foundation.string :as string]))
 
 (def boundaries

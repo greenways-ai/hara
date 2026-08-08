@@ -1,5 +1,5 @@
-(ns std.lib.block.parse
-  (:require [std.lib.block.construct :as construct]
+(ns std.block.parse
+  (:require [std.block.construct :as construct]
             [std.foundation.string :as string]
             [std.foundation.edn :as edn]))
 
