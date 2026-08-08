@@ -1,4 +1,4 @@
-name: Validate bytecode observation layout v2
+name: Validate bytecode observation layout v3
 
 on:
   push:
