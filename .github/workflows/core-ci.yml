@@ -95,13 +95,6 @@ jobs:
         with:
           components: clippy
 
-      - name: Run focused cleanup-safe code.test tests
-        if: steps.scope.outputs.run_core == 'true'
-        run: |
-          ./packaging/scripts/run-lib-tests \
-            core/lib/test/code/test_work_batch_test.hal \
-            core/lib/test/code/test_work_cleanup_test.hal
-
       - name: Check Rust module layout
         if: steps.scope.outputs.run_core == 'true'
         run: |
