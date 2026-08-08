@@ -10,6 +10,26 @@
     :depends ['greenways/hodos-core]
     :options {:output "target/hodos-authoring.harp"}}})
 
+(defn record-packages
+  [records]
+  (loop [index 0
+         output []]
+    (if (= index (count records))
+      output
+      (recur (inc index)
+             (conj output (:package (nth records index)))))))
+
+(defn checkpoint-item-ids
+  [checkpoints]
+  (loop [index 0
+         output []]
+    (if (= index (count checkpoints))
+      output
+      (recur (inc index)
+             (conj output
+                   (:checkpoint/item-id
+                    (nth checkpoints index)))))))
+
 (def results
   [(test/check
     "package commands preserve each CLI operation's argument order"
@@ -57,10 +77,8 @@
        (deref commands)
        (get-in output [:summary :items])
        (get-in output [:summary :errors])
-       (vec (sort (keys (:results output))))
-       (vec (sort (map (fn [checkpoint]
-                         (:checkpoint/item-id checkpoint))
-                       checkpoints)))])
+       (vec (sort (record-packages (:records output))))
+       (vec (sort (checkpoint-item-ids checkpoints)))])
     [:completed
      [["./hara" "package" "build" "packages/core"]
       ["./hara" "package" "build" "packages/addon-authoring"
@@ -92,13 +110,13 @@
        (get-in output [:summary :items])
        (get-in output [:summary :results])
        (get-in output [:summary :errors])
-       (vec (keys (:results output)))
+       (record-packages (:records output))
        (:package (first (:errors output)))])
     [:completed
      2
      1
      1
-     ['greenways/hodos-core]
+     ['greenways/hodos-core 'greenways/hodos-authoring]
      'greenways/hodos-authoring])
 
    (test/check
@@ -118,7 +136,7 @@
            {:context {:process/run runner}})]
       [(deref commands)
        (:items output)
-       (vec (keys (:results output)))])
+       (record-packages (:records output))])
     [[ ["./hara" "package" "check" "packages/core"]]
      ['greenways/hodos-core]
      ['greenways/hodos-core]])
