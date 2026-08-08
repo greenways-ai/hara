@@ -22,6 +22,12 @@ jobs:
           - namespace_use_refers_portable_test_vars_and_macros
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout hara-specs-registry
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-specs-registry
+          path: hara-specs-registry
+          fetch-depth: 1
       - uses: dtolnay/rust-toolchain@stable
       - name: Run isolated failing test
         env:
