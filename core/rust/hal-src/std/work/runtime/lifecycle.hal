@@ -43,6 +43,25 @@
    :context (or (:context options) {})
    :options options})
 
+(defn complete-run!
+  [runtime frame id result]
+  (let [current
+        (base/backend-call (base/runtime-backend runtime) :load-run id)]
+    (if (= :cancelled (:run/status current))
+      (do
+        (frame/emit! runtime frame :work/run-cancelled
+               {:result result})
+        (base/work-reference id))
+      (do
+        (base/backend-call (base/runtime-backend runtime)
+                      :update-run
+                      id
+                      {:run/status :completed
+                       :run/result result
+                       :run/error nil})
+        (frame/emit! runtime frame :work/run-completed {:result result})
+        (base/work-reference id)))))
+
 (defn execute-run!
   [runtime run work options]
   (let [id (:run/id run)
@@ -57,14 +76,7 @@
            {:run/version (:run/work-version run)})
     (try
       (let [result (handler/execute-node runtime frame work (:run/input run))]
-        (base/backend-call (base/runtime-backend runtime)
-                      :update-run
-                      id
-                      {:run/status :completed
-                       :run/result result
-                       :run/error nil})
-        (frame/emit! runtime frame :work/run-completed {:result result})
-        (base/work-reference id))
+        (complete-run! runtime frame id result))
       (catch Throwable error
         (let [current
               (base/backend-call (base/runtime-backend runtime) :load-run id)]
@@ -336,4 +348,3 @@
     (query-run runtime reference options))
   (-command [runtime reference command options]
     (command-run runtime reference command options)))
-
