@@ -45,7 +45,7 @@ source = (
 )
 observation_path.write_text(source)
 
-# Keep machine.rs at its recorded legacy maximum: an explicit path declaration,
+# Keep machine.rs below its recorded legacy maximum: an explicit path declaration,
 # one dispatch variant, and no duplicated run-loop arm.
 machine_path = root / "machine.rs"
 machine = machine_path.read_text()
@@ -97,8 +97,7 @@ old_docs = '''//! The synchronous stack machine.
 '''
 new_docs = '''//! The synchronous stack machine.
 //!
-//! Validated programs are the safety boundary; impossible indexes become [`VmError`]
-//! rather than panics, and dispatch avoids per-instruction allocation and name lookup.
+//! Validated programs reject impossible indexes and avoid per-instruction allocation.
 '''
 assert old_docs in machine, "machine module documentation changed"
 machine = machine.replace(old_docs, new_docs, 1)
