@@ -51,9 +51,6 @@ jobs:
               ;;
           esac
 
-          # A newly created branch has an all-zero `before` SHA. There is no
-          # reliable comparison range in that case, so keep the conservative
-          # behaviour and run the full core suite.
           if [[ -z "$base" || "$base" =~ ^0+$ ]] || \
              ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
             echo "run_core=true" >> "$GITHUB_OUTPUT"
@@ -61,10 +58,6 @@ jobs:
             exit 0
           fi
 
-          # Browser and Studio assets live under core/rust/web for packaging, but
-          # they are not Cargo or JVM core inputs. Their dedicated Studio and
-          # Site workflows build and validate them, so do not make pre-existing
-          # native runtime failures block an otherwise isolated web change.
           if git diff --quiet "$base" "$head" -- \
             core/rust \
             ':(exclude)core/rust/web' \
@@ -100,6 +93,10 @@ jobs:
         run: |
           bash core/rust/scripts/check-layout.test.sh
           bash core/rust/scripts/check-layout.sh
+
+      - name: Run focused code.vm bytecode tests
+        if: steps.scope.outputs.run_core == 'true'
+        run: ./packaging/scripts/run-lib-tests core/lib/test/code/vm/bytecode_test.hal
 
       - name: Check Rust
         if: steps.scope.outputs.run_core == 'true'
