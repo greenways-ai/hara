@@ -101,6 +101,10 @@ jobs:
           bash core/rust/scripts/check-layout.test.sh
           bash core/rust/scripts/check-layout.sh
 
+      - name: Run focused std.work cleanup tests
+        if: steps.scope.outputs.run_core == 'true'
+        run: ./packaging/scripts/run-lib-tests core/lib/test/std/work_cleanup_test.hal
+
       - name: Check Rust
         if: steps.scope.outputs.run_core == 'true'
         run: |
