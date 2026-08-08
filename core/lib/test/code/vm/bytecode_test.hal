@@ -1,0 +1,328 @@
+(ns code.vm.bytecode-test
+  (:require [code.vm :as vm]
+            [code.vm.bytecode :as bytecode]
+            [std.lib.test :as test]))
+
+(def +source+ "(+ 1 (* 2 3))")
+
+(defn value-preview [type display]
+  {:value/type type :value/display display :value/truncated false})
+
+(defn machine-state
+  [ip stack status]
+  {:function 0
+   :ip ip
+   :instruction nil
+   :stack stack
+   :locals []
+   :calls []
+   :handlers []
+   :status status})
+
+(def +program+
+  {:program/entry 0
+   :program/constants
+   [(value-preview "integer" "1")
+    (value-preview "integer" "2")
+    (value-preview "integer" "3")]
+   :program/functions
+   [{:function/id 0
+     :function/name "entry"
+     :arity 0
+     :locals 0
+     :max-stack 3
+     :instructions 6}]})
+
+(def +trace+
+  {:trace/schema "hal.bytecode-trace/v1"
+   :trace/id "bytecode-arithmetic-1"
+   :trace/status :ok
+   :trace/program +program+
+   :trace/events
+   [{:event/id 1
+     :event/sequence 1
+     :event/kind :program/validated
+     :event/status :ok
+     :machine/before (machine-state 0 [] :ready)
+     :machine/after (machine-state 0 [] :ready)}
+    {:event/id 2
+     :event/sequence 2
+     :event/kind :instruction/execute
+     :event/status :ok
+     :event/source {:form/path [0 1]}
+     :event/instruction {:opcode :constant :operands [0]}
+     :machine/before (machine-state 0 [] :ready)
+     :machine/after (machine-state 1 [(value-preview "integer" "1")] :ready)}
+    {:event/id 3
+     :event/sequence 3
+     :event/kind :instruction/execute
+     :event/status :ok
+     :event/source {:form/path [0 2 1]}
+     :event/instruction {:opcode :constant :operands [1]}
+     :machine/before (machine-state 1 [(value-preview "integer" "1")] :ready)
+     :machine/after
+     (machine-state
+      2
+      [(value-preview "integer" "1")
+       (value-preview "integer" "2")]
+      :ready)}
+    {:event/id 4
+     :event/sequence 4
+     :event/kind :instruction/execute
+     :event/status :ok
+     :event/source {:form/path [0 2 2]}
+     :event/instruction {:opcode :constant :operands [2]}
+     :machine/before
+     (machine-state
+      2
+      [(value-preview "integer" "1")
+       (value-preview "integer" "2")]
+      :ready)
+     :machine/after
+     (machine-state
+      3
+      [(value-preview "integer" "1")
+       (value-preview "integer" "2")
+       (value-preview "integer" "3")]
+      :ready)}
+    {:event/id 5
+     :event/sequence 5
+     :event/kind :instruction/execute
+     :event/status :ok
+     :event/source {:form/path [0 2]}
+     :event/instruction {:opcode :primitive :operands ["*" 2]}
+     :machine/before
+     (machine-state
+      3
+      [(value-preview "integer" "1")
+       (value-preview "integer" "2")
+       (value-preview "integer" "3")]
+      :ready)
+     :machine/after
+     (machine-state
+      4
+      [(value-preview "integer" "1")
+       (value-preview "integer" "6")]
+      :ready)}
+    {:event/id 6
+     :event/sequence 6
+     :event/kind :instruction/execute
+     :event/status :ok
+     :event/source {:form/path [0]}
+     :event/instruction {:opcode :primitive :operands ["+" 2]}
+     :machine/before
+     (machine-state
+      4
+      [(value-preview "integer" "1")
+       (value-preview "integer" "6")]
+      :ready)
+     :machine/after
+     (machine-state 5 [(value-preview "integer" "7")] :ready)}
+    {:event/id 7
+     :event/sequence 7
+     :event/kind :machine/return
+     :event/status :ok
+     :event/source {:form/path [0]}
+     :event/instruction {:opcode :return :operands []}
+     :machine/before
+     (machine-state 5 [(value-preview "integer" "7")] :ready)
+     :machine/after (machine-state 6 [] :returned)
+     :event/result (value-preview "integer" "7")}]
+   :trace/result (value-preview "integer" "7")})
+
+(def +error-trace+
+  {:trace/schema "hal.bytecode-trace/v1"
+   :trace/id "bytecode-error-1"
+   :trace/status :error
+   :trace/program +program+
+   :trace/events
+   [{:event/id 1
+     :event/sequence 1
+     :event/kind :machine/fail
+     :event/status :error
+     :event/source {:form/path [0]}
+     :event/instruction {:opcode :primitive :operands ["/" 2]}
+     :machine/before (machine-state 3 [] :ready)
+     :machine/after (machine-state 3 [] :failed)
+     :event/error "division by zero"}]
+   :trace/error "division by zero"})
+
+(def +suspend-trace+
+  {:trace/schema "hal.bytecode-trace/v1"
+   :trace/id "bytecode-suspend-1"
+   :trace/status :ok
+   :trace/program +program+
+   :trace/events
+   [{:event/id 1
+     :event/sequence 1
+     :event/kind :program/validated
+     :event/status :ok
+     :machine/before (machine-state 0 [] :ready)
+     :machine/after (machine-state 0 [] :ready)}
+    {:event/id 2
+     :event/sequence 2
+     :event/kind :machine/suspend
+     :event/status :suspended
+     :event/source {:form/path [0]}
+     :event/instruction {:opcode :await :operands []}
+     :machine/before (machine-state 0 [] :ready)
+     :machine/after (machine-state 0 [] :suspended)}
+    {:event/id 3
+     :event/sequence 3
+     :event/kind :machine/resume
+     :event/status :ok
+     :event/source {:form/path [0]}
+     :machine/before (machine-state 0 [] :suspended)
+     :machine/after
+     (machine-state 1 [(value-preview "integer" "42")] :ready)}
+    {:event/id 4
+     :event/sequence 4
+     :event/kind :machine/return
+     :event/status :ok
+     :event/source {:form/path [0]}
+     :event/instruction {:opcode :return :operands []}
+     :machine/before
+     (machine-state 1 [(value-preview "integer" "42")] :ready)
+     :machine/after (machine-state 2 [] :returned)
+     :event/result (value-preview "integer" "42")}]
+   :trace/result (value-preview "integer" "42")})
+
+(def results
+  [(test/check
+    "bytecode traces declare real VM boundaries"
+    [(bytecode/trace? +trace+)
+     (bytecode/trace? +error-trace+)
+     (bytecode/trace? +suspend-trace+)
+     (has? vm/bytecode-event-kinds :instruction/execute)
+     (has? vm/bytecode-event-kinds :exception/unwind)]
+    [true true true true true])
+
+   (test/check
+    "one bytecode step consumes one validated boundary"
+    (let [machine (bytecode/create +source+ +trace+)
+          next (bytecode/step machine)
+          transition (first (vm/trace next))]
+      [(:vm/kind next)
+       (:vm/status next)
+       (:vm/step next)
+       (:step/rule transition)
+       (get-in next [:vm/state :event/index])
+       (get-in next [:vm/state :machine/current :ip])])
+    [:bytecode :running 1 :program/validated 1 0])
+
+   (test/check
+    "instruction replay exposes stack changes and final return"
+    (let [machine (vm/bytecode-from-trace +source+ +trace+)
+          instructions
+          (filter
+           (fn [transition]
+             (= :instruction/execute (:step/rule transition)))
+           (vm/trace machine))]
+      [(:vm/status machine)
+       (:vm/step machine)
+       (get-in machine [:vm/result :value/display])
+       (vec
+        (map
+         (fn [transition]
+           (get-in transition [:step/events 0 :event/instruction :opcode]))
+         instructions))
+       (vec
+        (map
+         (fn [transition]
+           (get-in transition [:step/events 0 :machine/after :ip]))
+         instructions))])
+    [:returned 7 "7"
+     [:constant :constant :constant :primitive :primitive]
+     [1 2 3 4 5]])
+
+   (test/check
+    "instruction events retain exact source forms for Hodos"
+    (let [machine
+          (bytecode/from-trace
+           +source+
+           +trace+
+           {:source {:id "lesson/main" :version 6}})
+          instructions
+          (filter
+           (fn [transition]
+             (= :instruction/execute (:step/rule transition)))
+           (vm/trace machine))]
+      [(vec
+        (map
+         (fn [transition]
+           (get-in transition [:step/source :form/path]))
+         instructions))
+       (vec
+        (map
+         (fn [transition]
+           (get-in transition [:step/source :form/source]))
+         instructions))
+       (get-in (vm/bytecode-source-index machine) [:source/id])
+       (get-in (vm/bytecode-source-index machine) [:source/version])])
+    [[[0 1] [0 2 1] [0 2 2] [0 2] [0]]
+     ["1" "2" "3" "(* 2 3)" "(+ 1 (* 2 3))"]
+     "lesson/main"
+     6])
+
+   (test/check
+    "VM failures preserve instruction and source attribution"
+    (let [machine (bytecode/from-trace +source+ +error-trace+)
+          transition (last (vm/trace machine))]
+      [(:vm/status machine)
+       (:vm/step machine)
+       (:vm/error machine)
+       (:step/rule transition)
+       (get-in transition [:step/source :form/path])
+       (get-in transition [:step/events 0 :event/instruction :opcode])])
+    [:failed 1 "division by zero" :machine/fail [0] :primitive])
+
+   (test/check
+    "suspension is observable and resumes at the next boundary"
+    (let [suspended
+          (bytecode/run
+           (bytecode/create +source+ +suspend-trace+))
+          resumed (bytecode/resume suspended)
+          completed (bytecode/run resumed)]
+      [(:vm/status suspended)
+       (:vm/step suspended)
+       (get-in suspended [:vm/state :event/index])
+       (:vm/status resumed)
+       (get-in resumed [:vm/state :machine/current :ip])
+       (:vm/status completed)
+       (get-in completed [:vm/result :value/display])])
+    [:suspended 2 2 :running 1 :returned "42"])
+
+   (test/check
+    "bounded replay suspends without losing the next instruction"
+    (let [machine (bytecode/create +source+ +trace+)
+          suspended (bytecode/run machine {:steps 3})
+          resumed (bytecode/resume suspended)
+          completed (bytecode/run resumed)]
+      [(:vm/status suspended)
+       (:vm/step suspended)
+       (get-in suspended [:vm/state :event/index])
+       (:step/rule (last (vm/trace suspended)))
+       (get-in resumed [:vm/state :event/index])
+       (:vm/status completed)])
+    [:suspended 4 3 :run/step-limit 4 :returned])
+
+   (test/check
+    "invalid event kinds and source references fail before replay"
+    [(try
+       (do
+         (bytecode/create
+          +source+
+          (assoc-in +trace+ [:trace/events 0 :event/kind] :unknown/event))
+         false)
+       (catch Throwable error true))
+     (try
+       (do
+         (bytecode/create
+          +source+
+          (assoc-in +trace+ [:trace/events 1 :event/source]
+                    {:form/path [99]}))
+         false)
+       (catch Throwable error true))]
+    [true true])])
+
+(test/print-results results)
