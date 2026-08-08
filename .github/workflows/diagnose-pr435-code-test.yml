@@ -1,0 +1,84 @@
+name: Diagnose PR 435 code.test run
+
+on:
+  push:
+    branches:
+      - agent/finish-vm-observation-release-gate
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe (${{ matrix.phase }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        phase:
+          - namespace
+          - register
+          - selected
+          - work-spec
+          - work-run
+          - public-run
+          - positional
+          - cancelled
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout hara-specs-registry
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-specs-registry
+          path: hara-specs-registry
+          fetch-depth: 1
+      - name: Expose specs registry at the runtime fixture path
+        run: ln -sfn "$GITHUB_WORKSPACE/hara-specs-registry" "$GITHUB_WORKSPACE/../hara-specs-registry"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Replace release-gate test with focused phase
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path("core/rust/src/lib.rs")
+          text = path.read_text()
+          start_marker = "    #[test]\n    fn namespace_use_refers_portable_test_vars_and_macros()"
+          end_marker = "    #[test]\n    fn foundation_code_test_compatibility_namespaces_are_embedded()"
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          setup = '''(ns code.test-rust-probe (:use code.test))
+          (fact "simple" (+ 1 1) => 2)'''
+          sources = {
+              "namespace": '(ns code.test-rust-probe (:use code.test)) :loaded',
+              "register": setup + ' :registered',
+              "selected": setup + ' (:status (run-selected nil {:namespace "code.test-rust-probe"}))',
+              "work-spec": setup + ' (:op (std.work/work-spec (suite-work)))',
+              "work-run": setup + ' (:status (std.work/run (std.work/local-runtime) (suite-work) {:namespace "code.test-rust-probe"} {}))',
+              "public-run": setup + ' (:status (run {:namespace "code.test-rust-probe"}))',
+              "positional": setup + " (:facts (run '[code]))",
+              "cancelled": setup + ' (:cancelled (:counts (run {:namespace "code.test-rust-probe" :control (function-control (fn [fact] true))})))',
+          }
+          phase = os.environ["PHASE"]
+          source = sources[phase]
+          replacement = f'''    #[test]
+              fn namespace_use_refers_portable_test_vars_and_macros() {{
+                  let mut runtime = Runtime::new();
+                  runtime.load_embedded_namespace("code.test").unwrap();
+                  eprintln!("phase={phase}");
+                  let result = runtime.eval_text(r###"{source}"###).unwrap();
+                  eprintln!("phase={phase} result={{result}}");
+              }}
+
+          '''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+      - name: Run focused phase
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          cargo test --manifest-path core/rust/Cargo.toml \
+            tests::namespace_use_refers_portable_test_vars_and_macros \
+            -- --exact --nocapture --test-threads=1
