@@ -1,4 +1,4 @@
-use crate::core::Value;
+use crate::core::{PromiseState, Value};
 
 use crate::vm::machine::observation::{ObservedStep, ObservedStepOutcome};
 use super::super::{
