@@ -37,6 +37,17 @@ use crate::task::promise::settle_result;
 #[path = "machine/globals.rs"]
 mod globals;
 
+#[cfg(feature = "bytecode-observation")]
+#[path = "machine/observation.rs"]
+mod observation;
+#[cfg(feature = "bytecode-observation")]
+pub use observation::{
+    CallFrameSnapshot, HandlerSnapshot, InstructionOperand, InstructionSnapshot,
+    MachineObservationStatus, MachineSnapshot, ObservationEventKind, ObservationEventStatus,
+    ObservationLimits, ObservedStep, ObservedStepOutcome, ProgramSnapshot, SourcePositionSnapshot,
+    ValueSnapshot, BYTECODE_TRACE_SCHEMA,
+};
+
 /// Terminal state of a machine run. Suspension variants belong to the
 /// later async milestone; adding them does not change instruction
 /// dispatch, only the set of exit points.
@@ -52,6 +63,7 @@ pub enum VmOutcome {
 /// cost per guest call level small (issue #223).
 enum Dispatch {
     Next(usize),
+    Unwound(usize),
     Call {
         callee: VmSlot,
         args: Vec<VmSlot>,
@@ -705,6 +717,14 @@ impl Machine {
                     }
                     self.ip = next_ip;
                 }
+                Dispatch::Unwound(ip) => {
+                    #[cfg(feature = "tracing-jit")]
+                    {
+                        self.jit_path.clear();
+                        self.jit_loop_entries.clear();
+                    }
+                    self.ip = ip;
+                }
                 Dispatch::Call { callee, args } => {
                     #[cfg(feature = "tracing-jit")]
                     {
@@ -778,7 +798,7 @@ impl Machine {
                 match $expr {
                     Ok(()) => {}
                     Err(message) => match self.raise(function, message) {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     },
                 }
@@ -789,7 +809,7 @@ impl Machine {
             Instruction::Constant(index) => {
                 let Some(value) = program.constants.get(*index as usize) else {
                     match self.raise(function, format!("constant index {index} out of range")) {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 };
@@ -801,7 +821,7 @@ impl Machine {
             Instruction::LoadLocal(slot) => {
                 let Some(value) = self.frame.local(*slot) else {
                     match self.raise(function, format!("local slot {slot} out of range")) {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 };
@@ -810,13 +830,13 @@ impl Machine {
             Instruction::StoreLocal(slot) => {
                 let Some(value) = self.stack.pop() else {
                     match self.raise(function, "stack underflow") {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 };
                 if !self.frame.store(*slot, value) {
                     match self.raise(function, format!("local slot {slot} out of range")) {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 }
@@ -824,7 +844,7 @@ impl Machine {
             Instruction::Pop => {
                 if self.stack.pop().is_none() {
                     match self.raise(function, "stack underflow") {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 }
@@ -839,7 +859,7 @@ impl Machine {
                 let argc = usize::from(*argc);
                 if self.stack.len() < argc {
                     match self.raise(function, "stack underflow") {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 }
@@ -924,7 +944,7 @@ impl Machine {
                 match result {
                     Ok(value) => self.stack.push(value),
                     Err(message) => match self.raise(function, message) {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     },
                 }
@@ -960,7 +980,7 @@ impl Machine {
                 match result {
                     Ok(value) => self.stack.push(value),
                     Err(message) => match self.raise(function, message) {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     },
                 }
@@ -969,7 +989,7 @@ impl Machine {
             Instruction::JumpIfFalse(target) => {
                 let Some(condition) = self.stack.pop() else {
                     match self.raise(function, "stack underflow") {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 };
@@ -986,7 +1006,7 @@ impl Machine {
             Instruction::Call { argc } => match self.collect_call(*argc) {
                 Ok((callee, args)) => return Dispatch::Call { callee, args },
                 Err(message) => match self.raise(function, message) {
-                    Ok(target) => return Dispatch::Next(target),
+                    Ok(target) => return Dispatch::Unwound(target),
                     Err(error) => return Dispatch::Failed(error),
                 },
             },
@@ -1000,7 +1020,7 @@ impl Machine {
                 if direct {
                     if self.stack.len() < usize::from(*argc) {
                         match self.raise(function, "stack underflow") {
-                            Ok(target) => return Dispatch::Next(target),
+                            Ok(target) => return Dispatch::Unwound(target),
                             Err(error) => return Dispatch::Failed(error),
                         }
                     }
@@ -1018,7 +1038,7 @@ impl Machine {
                         };
                     }
                     Err(message) => match self.raise(function, message) {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     },
                 }
@@ -1026,20 +1046,20 @@ impl Machine {
             Instruction::Throw => {
                 let Some(value) = self.stack.pop() else {
                     match self.raise(function, "stack underflow") {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 };
                 let message = crate::core::thrown_error(Self::into_value(program.clone(), value));
                 match self.raise(function, message) {
-                    Ok(target) => return Dispatch::Next(target),
+                    Ok(target) => return Dispatch::Unwound(target),
                     Err(error) => return Dispatch::Failed(error),
                 }
             }
             Instruction::Rethrow => {
                 let Some(value) = self.stack.pop() else {
                     match self.raise(function, "stack underflow") {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 };
@@ -1053,7 +1073,7 @@ impl Machine {
                     }
                 };
                 match self.raise(function, message) {
-                    Ok(target) => return Dispatch::Next(target),
+                    Ok(target) => return Dispatch::Unwound(target),
                     Err(error) => return Dispatch::Failed(error),
                 }
             }
@@ -1111,7 +1131,7 @@ impl Machine {
                 };
                 let Some(Value::Promise(promise)) = value.runtime_value() else {
                     match self.raise(function, "await expects a promise") {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     }
                 };
@@ -1124,7 +1144,7 @@ impl Machine {
                     PromiseState::Rejected(error) => {
                         self.stack.pop();
                         match self.raise(function, error.message()) {
-                            Ok(target) => return Dispatch::Next(target),
+                            Ok(target) => return Dispatch::Unwound(target),
                             Err(error) => return Dispatch::Failed(error),
                         }
                     }
@@ -1153,7 +1173,7 @@ impl Machine {
                 match crate::core::call_host_value(service, target, arguments) {
                     Ok(value) => self.stack.push(value.into()),
                     Err(message) => match self.raise(function, message) {
-                        Ok(target) => return Dispatch::Next(target),
+                        Ok(target) => return Dispatch::Unwound(target),
                         Err(error) => return Dispatch::Failed(error),
                     },
                 }

@@ -105,6 +105,11 @@ impl Frame {
         }
     }
 
+    /// Borrowed local slots for bounded machine observations.
+    pub(crate) fn locals(&self) -> &[VmSlot] {
+        &self.locals
+    }
+
     /// Operand-stack base at which this frame was entered.
     pub(crate) fn base(&self) -> usize {
         self.base
