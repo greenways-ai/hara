@@ -4,6 +4,8 @@ pub mod form;
 pub mod generated;
 #[path = "kernel/halc.rs"]
 pub mod halc;
+#[path = "kernel/halc_trace.rs"]
+pub mod halc_trace;
 #[path = "kernel/namespace.rs"]
 pub mod namespace;
 #[path = "kernel/parser.rs"]
