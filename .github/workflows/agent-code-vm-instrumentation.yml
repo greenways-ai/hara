@@ -27,7 +27,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - name: Add the machine child module and repair the focused fixture
+      - name: Add the machine child module and public metric projection
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -49,31 +49,13 @@ jobs:
               text = text.replace(marker, addition, 1)
           machine.write_text(text)
 
-          instrumentation = Path('core/rust/src/vm/machine/instrumentation.rs')
-          text = instrumentation.read_text()
-          marker = '#[cfg(test)]\nmod tests;'
-          replacement = '#[cfg(test)]\n#[path = "instrumentation/tests.rs"]\nmod tests;'
-          if replacement not in text:
-              if marker not in text:
-                  raise SystemExit('instrumentation test marker not found')
-              text = text.replace(marker, replacement, 1)
-          instrumentation.write_text(text)
-
-          tests = Path('core/rust/src/vm/machine/instrumentation/tests.rs')
-          text = tests.read_text()
-          old = 'Value::Vector(vec![1.into(), 2.into(), 3.into(), 4.into()].into())'
-          new = '''Value::Vector(
-              vec![
-                  Value::Number(1),
-                  Value::Number(2),
-                  Value::Number(3),
-                  Value::Number(4),
-              ]
-              .into(),
-          )'''
+          vm = Path('core/rust/src/vm.rs')
+          text = vm.read_text()
+          old = 'BytecodeMetrics, CounterProbe, EventRing, InstructionEvent, NoProbe, Opcode, SampledProbe,'
+          new = 'BytecodeMetrics, CounterProbe, EventRing, InstructionEvent, NoProbe, Opcode, OpcodeCount, SampledProbe,'
           if old in text:
               text = text.replace(old, new, 1)
-          tests.write_text(text)
+          vm.write_text(text)
           PY
       - name: Format the focused instrumentation slice
         run: |
@@ -82,6 +64,8 @@ jobs:
             core/rust/src/vm/machine.rs
           rustfmt --edition 2021 --config skip_children=true \
             core/rust/src/vm/machine/instrumentation.rs \
+            core/rust/src/vm/machine/instrumentation/ring.rs \
+            core/rust/src/vm/machine/instrumentation/run.rs \
             core/rust/src/vm/machine/instrumentation/tests.rs
       - name: Test compact instrumentation
         run: |
