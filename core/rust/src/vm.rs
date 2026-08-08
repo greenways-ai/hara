@@ -111,14 +111,14 @@ pub use compiler::{compile_halc_module, compile_source, compile_source_with};
 pub use disassemble::disassemble;
 pub use error::{CompileError, CompileErrorKind, ValidationError, VmError};
 pub use fiber::{VmFiber, VmFiberState};
-pub use machine::{execute_program, execute_program_with_globals, Machine, VmOutcome};
 #[cfg(feature = "bytecode-observation")]
-pub use machine::{
+pub use machine::observation::{
     CallFrameSnapshot, HandlerSnapshot, InstructionOperand, InstructionSnapshot,
     MachineObservationStatus, MachineSnapshot, ObservationEventKind, ObservationEventStatus,
     ObservationLimits, ObservedStep, ObservedStepOutcome, ProgramSnapshot, SourcePositionSnapshot,
     ValueSnapshot, BYTECODE_TRACE_SCHEMA,
 };
+pub use machine::{execute_program, execute_program_with_globals, Machine, VmOutcome};
 pub use opcode::Instruction;
 pub use prepared::{prepare_call, PreparedCall};
 pub use program::{FunctionId, FunctionPrototype, Program};
