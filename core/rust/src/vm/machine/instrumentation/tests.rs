@@ -40,6 +40,9 @@ fn counters_cover_instructions_opcodes_and_depths() {
     assert_eq!(metrics.schema, BYTECODE_METRICS_SCHEMA);
     assert!(metrics.instructions >= 2);
     assert!(probe.opcode_count(Opcode::Primitive) >= 1);
+    assert!(metrics
+        .named_opcode_counts()
+        .any(|entry| entry.opcode == "primitive" && entry.count >= 1));
     assert_eq!(metrics.terminal_returns, 1);
     assert_eq!(metrics.failures, 0);
     assert!(metrics.max_stack_depth >= 1);
@@ -77,7 +80,15 @@ fn event_ring_is_fixed_capacity_and_reports_overwrite() {
     let mut events = EventRing::with_capacity(3);
     assert_eq!(
         returned(machine.run_instrumented(&mut events)),
-        Value::Vector(vec![1.into(), 2.into(), 3.into(), 4.into()].into())
+        Value::Vector(
+            vec![
+                Value::Number(1),
+                Value::Number(2),
+                Value::Number(3),
+                Value::Number(4),
+            ]
+            .into(),
+        )
     );
     assert_eq!(events.schema(), BYTECODE_EVENTS_SCHEMA);
     assert_eq!(events.capacity(), 3);
