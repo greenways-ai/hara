@@ -83,7 +83,8 @@
    (test/check
     "idempotent suite starts replay the completed suite boundary"
     [(work/status suite-runtime same-suite-reference)
-     (= suite-reference same-suite-reference)
+     (= (:run/id (work/run-record suite-runtime suite-reference))
+        (:run/id (work/run-record suite-runtime same-suite-reference)))
      (deref execution-count)
      (count (work/checkpoints suite-runtime suite-reference))]
     [:completed true 1 1])
