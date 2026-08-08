@@ -1,0 +1,211 @@
+(ns code.vm.source
+  (:require [std.block :as block]))
+
+(defn- invalid
+  [message data]
+  (throw (ex-info message data)))
+
+(defn- map-value
+  [label value]
+  (if (map? value)
+    value
+    (invalid
+     (str "code.vm.source " label " must be a map")
+     {:field label
+      :value value})))
+
+(defn- source-version
+  [value]
+  (if (and (integer? value)
+           (>= value 0))
+    value
+    (invalid
+     "code.vm.source version must be a non-negative integer"
+     {:value value})))
+
+(defn- source-root
+  [input]
+  (cond
+    (string? input)
+    (block/parse-root input)
+
+    (block/block? input)
+    (if (= :root (block/tag input))
+      input
+      (block/root [input] (block/string input)))
+
+    :else
+    (let [form (block/block input)]
+      (block/root [form] (block/string form)))))
+
+(defn- form-entry
+  [source-id version form path parent offset]
+  {:source/id source-id
+   :source/version version
+   :form/path path
+   :form/parent parent
+   :form/type (block/type form)
+   :form/tag (block/tag form)
+   :form/source (block/string form)
+   :form/value (block/value form)
+   :form/span
+   {:start offset
+    :end (+ offset (block/length form))}})
+
+(defn- walk-container
+  [source-id version container parent-path start-offset]
+  (let [children (block/children container)]
+    (loop [physical-index 0
+           expression-index 0
+           offset start-offset
+           output []]
+      (if (= physical-index (count children))
+        output
+        (let [child (nth children physical-index)
+              length (block/length child)]
+          (if (block/code? child)
+            (let [path (conj parent-path expression-index)
+                  entry (form-entry
+                         source-id version child path parent-path offset)
+                  nested
+                  (if (block/container? child)
+                    (walk-container
+                     source-id
+                     version
+                     child
+                     path
+                     (+ offset (block/prefixed child)))
+                    [])]
+              (recur
+               (inc physical-index)
+               (inc expression-index)
+               (+ offset length)
+               (into (conj output entry) nested)))
+            (recur
+             (inc physical-index)
+             expression-index
+             (+ offset length)
+             output)))))))
+
+(defn form?
+  [value]
+  (and (map? value)
+       (string? (:source/id value))
+       (integer? (:source/version value))
+       (vector? (:form/path value))
+       (string? (:form/source value))
+       (map? (:form/span value))
+       (integer? (get-in value [:form/span :start]))
+       (integer? (get-in value [:form/span :end]))))
+
+(defn source?
+  [value]
+  (and (map? value)
+       (string? (:source/id value))
+       (integer? (:source/version value))
+       (string? (:source/text value))
+       (vector? (:source/forms value))
+       (every? form? (:source/forms value))
+       (map? (:source/by-path value))))
+
+(defn index
+  ([input]
+   (index input {}))
+  ([input options]
+   (let [options (map-value "options" (or options {}))
+         root (source-root input)
+         id (or (:id options) "source")
+         version (source-version (or (:version options) 0))
+         forms
+         (walk-container
+          id
+          version
+          root
+          []
+          (block/prefixed root))
+         by-path
+         (reduce
+          (fn [output form]
+            (assoc output (:form/path form) form))
+          {}
+          forms)]
+     (if (and (string? id) (> (count id) 0))
+       {:source/id id
+        :source/version version
+        :source/text (block/string root)
+        :source/forms forms
+        :source/by-path by-path}
+       (invalid
+        "code.vm.source id must be a non-empty string"
+        {:value id})))))
+
+(defn forms
+  [source-index]
+  (if (source? source-index)
+    (:source/forms source-index)
+    (invalid
+     "code.vm.source requires a source index"
+     {:value source-index})))
+
+(defn form-at
+  [source-index path]
+  (if (vector? path)
+    (get (:source/by-path
+          (if (source? source-index)
+            source-index
+            (invalid
+             "code.vm.source requires a source index"
+             {:value source-index})))
+         path)
+    (invalid
+     "code.vm.source form path must be a vector"
+     {:value path})))
+
+(defn form-by-span
+  [source-index span]
+  (let [span (map-value "form span" span)
+        start (:start span)
+        end (:end span)]
+    (first
+     (filter
+      (fn [form]
+        (and (= start (get-in form [:form/span :start]))
+             (= end (get-in form [:form/span :end]))))
+      (forms source-index)))))
+
+(defn entry-form
+  [source-index]
+  (let [top-level
+        (filter
+         (fn [form]
+           (= 1 (count (:form/path form))))
+         (forms source-index))]
+    (if (= 1 (count top-level))
+      (first top-level)
+      nil)))
+
+(defn resolve
+  [source-index reference]
+  (cond
+    (nil? reference)
+    nil
+
+    (vector? reference)
+    (form-at source-index reference)
+
+    (form? reference)
+    reference
+
+    (map? reference)
+    (if (vector? (:form/path reference))
+      (form-at source-index (:form/path reference))
+      (if (map? (:form/span reference))
+        (form-by-span source-index (:form/span reference))
+        (invalid
+         "code.vm.source reference requires :form/path or :form/span"
+         {:value reference})))
+
+    :else
+    (invalid
+     "code.vm.source reference must be a path or map"
+     {:value reference})))

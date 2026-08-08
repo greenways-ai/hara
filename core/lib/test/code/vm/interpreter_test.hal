@@ -9,6 +9,9 @@
    :value/display display
    :value/truncated false})
 
+(def +nested-source+
+  "(+ 1 (* 2 3))")
+
 (def +nested-journal+
   {:journal/schema "hal.evaluation-journal/v1"
    :journal/id "journal-17"
@@ -16,10 +19,12 @@
    :journal/events
    [{:event/id 1
      :event/sequence 1
-     :event/kind :evaluation/start}
+     :event/kind :evaluation/start
+     :event/source {:form/path [0]}}
     {:event/id 2
      :event/sequence 2
      :event/kind :operation/enter
+     :event/source {:form/path [0 2]}
      :operation/id 1
      :operation/parent nil
      :operation/depth 0
@@ -38,6 +43,7 @@
     {:event/id 4
      :event/sequence 4
      :event/kind :operation/enter
+     :event/source {:form/path [0]}
      :operation/id 2
      :operation/parent nil
      :operation/depth 0
@@ -62,10 +68,12 @@
    :journal/events
    [{:event/id 1
      :event/sequence 1
-     :event/kind :evaluation/start}
+     :event/kind :evaluation/start
+     :event/source {:form/path [0]}}
     {:event/id 2
      :event/sequence 2
      :event/kind :operation/enter
+     :event/source {:form/path [0]}
      :operation/id 1
      :operation/parent nil
      :operation/depth 0
@@ -86,7 +94,8 @@
    :journal/events
    [{:event/id 1
      :event/sequence 1
-     :event/kind :evaluation/start}
+     :event/kind :evaluation/start
+     :event/source {:form/path [0]}}
     {:event/id 2
      :event/sequence 2
      :event/kind :journal/truncated
@@ -105,7 +114,7 @@
     "one interpreter step consumes one real journal event"
     (let [machine
           (interpreter/create
-           '(+ 1 (* 2 3))
+           +nested-source+
            +nested-journal+)
           next (interpreter/step machine)
           transition (first (vm/trace next))]
@@ -113,14 +122,15 @@
        (:vm/step next)
        (get-in next [:vm/state :event/index])
        (:step/rule transition)
-       (get-in transition [:step/source :event/sequence])])
-    [:running 1 1 :evaluation/start 1])
+       (get-in transition [:step/source :event/sequence])
+       (get-in transition [:step/source :form/path])])
+    [:running 1 1 :evaluation/start 1 [0]])
 
    (test/check
     "journal replay preserves nested-result order and returns the journal result"
     (let [machine
           (vm/interpreter-from-journal
-           '(+ 1 (* 2 3))
+           +nested-source+
            +nested-journal+)
           trace (vm/trace machine)
           returns
@@ -152,6 +162,39 @@
      ["6" "7"]])
 
    (test/check
+    "operation returns retain the source identity established on entry"
+    (let [machine
+          (vm/interpreter-from-journal
+           +nested-source+
+           +nested-journal+
+           {:source {:id "lesson/main"
+                     :version 3}})
+          operations
+          (filter
+           (fn [transition]
+             (or (= :operation/enter (:step/rule transition))
+                 (= :operation/return (:step/rule transition))))
+           (vm/trace machine))]
+      [(vm/source? (vm/interpreter-source-index machine))
+       (vec
+        (map
+         (fn [transition]
+           (get-in transition [:step/source :form/path]))
+         operations))
+       (vec
+        (map
+         (fn [transition]
+           (get-in transition [:step/source :form/source]))
+         operations))
+       (get-in machine [:vm/state :source/current :source/id])
+       (get-in machine [:vm/state :source/current :source/version])])
+    [true
+     [[0 2] [0 2] [0] [0]]
+     ["(* 2 3)" "(* 2 3)" "(+ 1 (* 2 3))" "(+ 1 (* 2 3))"]
+     "lesson/main"
+     3])
+
+   (test/check
     "runtime journal failures become terminal VM failures"
     (let [machine
           (interpreter/from-journal
@@ -162,8 +205,9 @@
        (:vm/step machine)
        (:vm/error machine)
        (:step/rule transition)
-       (get-in machine [:vm/state :event/index])])
-    [:failed 3 "division by zero" :evaluation/error 3])
+       (get-in machine [:vm/state :event/index])
+       (get-in transition [:step/source :form/path])])
+    [:failed 3 "division by zero" :evaluation/error 3 [0]])
 
    (test/check
     "journal truncation is explicit without discarding the final value"
@@ -182,7 +226,7 @@
     "bounded replay suspends and can resume from the next journal event"
     (let [machine
           (interpreter/create
-           '(+ 1 (* 2 3))
+           +nested-source+
            +nested-journal+)
           suspended (interpreter/run machine {:steps 2})
           resumed (interpreter/run suspended {:steps 10})]
@@ -202,6 +246,20 @@
          '(+ 1 2)
          (assoc +nested-journal+
                 :journal/schema "unknown/journal"))
+        false)
+      (catch Throwable error
+        true))
+    true)
+
+   (test/check
+    "invalid event source references fail before replay"
+    (try
+      (do
+        (interpreter/create
+         '(+ 1 2)
+         (assoc-in +nested-journal+
+                   [:journal/events 0 :event/source]
+                   {:unknown true}))
         false)
       (catch Throwable error
         true))
