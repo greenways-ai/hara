@@ -2,7 +2,8 @@
   (:require [code.vm.model :as model]
             [code.vm.source :as source]
             [code.vm.interpreter :as interpreter]
-            [code.vm.halc :as halc]))
+            [code.vm.halc :as halc]
+            [code.vm.bytecode :as bytecode]))
 
 (def kinds model/+vm-kinds+)
 (def statuses model/+vm-statuses+)
@@ -46,3 +47,14 @@
 (def halc-step halc/step)
 (def halc-run halc/run)
 (def halc-from-trace halc/from-trace)
+
+(def bytecode-trace-schema bytecode/+trace-schema+)
+(def bytecode-event-kinds bytecode/+event-kinds+)
+(def bytecode-trace? bytecode/trace?)
+(def bytecode-machine? bytecode/bytecode-machine?)
+(def bytecode-create bytecode/create)
+(def bytecode-source-index bytecode/source-index)
+(def bytecode-step bytecode/step)
+(def bytecode-resume bytecode/resume)
+(def bytecode-run bytecode/run)
+(def bytecode-from-trace bytecode/from-trace)
