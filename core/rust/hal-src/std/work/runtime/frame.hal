@@ -43,17 +43,6 @@
    (:node/path frame)
    (:item/id frame)])
 
-(defn leaf-context
-  [frame]
-  (merge (or (:context frame) {})
-         {:run/id (:run/id frame)
-          :work/root (:work/root frame)
-          :work/version (:work/version frame)
-          :node/path (:node/path frame)
-          :item/id (:item/id frame)
-          :item/path (or (:item/path frame) [])
-          :work/options (:options frame)}))
-
 (defn emit!
   [runtime frame event data]
   (let [record
@@ -71,6 +60,24 @@
         (catch Throwable error nil)))
     stored))
 
+(defn leaf-context
+  ([frame]
+   (merge (or (:context frame) {})
+          {:run/id (:run/id frame)
+           :work/root (:work/root frame)
+           :work/version (:work/version frame)
+           :node/path (:node/path frame)
+           :item/id (:item/id frame)
+           :item/path (or (:item/path frame) [])
+           :work/cleanup? (if (:work/cleanup? frame) true false)
+           :work/options (:options frame)}))
+  ([runtime frame]
+   (assoc
+    (leaf-context frame)
+    :work/emit!
+    (fn [event data]
+      (emit! runtime frame event data)))))
+
 (defn cancelled?
   [runtime frame]
   (= :cancelled
@@ -79,7 +86,8 @@
 
 (defn assert-running!
   [runtime frame]
-  (if (cancelled? runtime frame)
+  (if (and (not (:work/cleanup? frame))
+           (cancelled? runtime frame))
     (throw
      (ex-info "Work run has been cancelled" {:run/id (:run/id frame)}))))
 

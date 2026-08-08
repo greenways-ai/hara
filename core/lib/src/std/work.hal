@@ -95,6 +95,21 @@
    (definition
     (merge options stages {:op :batch}))))
 
+(defn ensure
+  "Runs cleanup after body completion, failure, or cancellation.
+
+   Cleanup receives an outcome map containing the original input and body
+   result/error. The default return value is the body result. Set
+   `:return :outcome` to retain both successful body and cleanup results."
+  ([body cleanup]
+   (ensure {} body cleanup))
+  ([options body cleanup]
+   (definition
+    (merge options
+           {:op :ensure
+            :work body
+            :cleanup cleanup}))))
+
 (def memory-backend runtime/memory-backend)
 (def local-runtime runtime/local-runtime)
 (def durable-runtime runtime/durable-runtime)
@@ -105,6 +120,18 @@
 (def handler-operations runtime/handler-operations)
 (def checkpoint-key runtime/checkpoint-key)
 (def manifest-values runtime/manifest-values)
+
+(defn emit!
+  "Appends one structured domain event through the active work runtime."
+  ([context event]
+   (emit! context event {}))
+  ([context event data]
+   (let [emitter (:work/emit! context)]
+     (if emitter
+       (emitter event data)
+       (throw
+        (ex-info "Work event emission is not available in this context"
+                 {:event event}))))))
 
 (defn register
   ([runtime work]

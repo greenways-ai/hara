@@ -1,0 +1,152 @@
+(ns std.work-cleanup-test
+  (:require [std.lib.test :as test]
+            [std.work :as work]))
+
+(defn event-count
+  [events event]
+  (reduce
+   (fn [total record]
+     (if (= event (:event record))
+       (inc total)
+       total))
+   0
+   events))
+
+(def success-cleanups (atom 0))
+(def success-runtime (work/durable-runtime))
+(def success-work
+  (work/ensure
+   {:id :successful-scope
+    :version 1
+    :return :outcome}
+   (work/step :successful-body
+     (fn [input context]
+       (work/emit! context :example/body {:input input})
+       (+ input 2)))
+   (work/step :successful-cleanup
+     (fn [outcome context]
+       (swap! success-cleanups inc)
+       {:cleanup? (:work/cleanup? context)
+        :body/status (:work/body-status outcome)
+        :body/result (:work/body-result outcome)}))))
+(def success-reference
+  (work/start success-runtime
+              success-work
+              3
+              {:id "successful-cleanup"}))
+(def success-result
+  (work/result success-runtime success-reference))
+(def success-history
+  (work/history success-runtime success-reference))
+
+(def failed-cleanups (atom 0))
+(def failure-runtime (work/durable-runtime))
+(def failure-work
+  (work/ensure
+   {:id :failed-scope
+    :version 1}
+   (work/step :failed-body
+     (fn [input context]
+       (throw (ex-info "body failed" {:input input}))))
+   (work/step :failed-cleanup
+     (fn [outcome context]
+       (swap! failed-cleanups inc)
+       {:cleanup? (:work/cleanup? context)
+        :body/status (:work/body-status outcome)
+        :body/error (:work/body-error outcome)}))))
+(def failure-reference
+  (work/start failure-runtime
+              failure-work
+              :input
+              {:id "failed-cleanup"}))
+
+(def cancelled-cleanups (atom 0))
+(def cancellation-runtime (work/durable-runtime))
+(def cancellation-work
+  (work/ensure
+   {:id :cancelled-scope
+    :version 1}
+   (work/step :cancelling-body
+     (fn [input context]
+       (work/cancel cancellation-runtime
+                    "cancelled-cleanup"
+                    {:reason :test})
+       :body-completed))
+   (work/step :cancelled-cleanup
+     (fn [outcome context]
+       (swap! cancelled-cleanups inc)
+       {:cleanup? (:work/cleanup? context)
+        :body/status (:work/body-status outcome)}))))
+(def cancellation-reference
+  (work/start cancellation-runtime
+              cancellation-work
+              nil
+              {:id "cancelled-cleanup"}))
+(def cancellation-history
+  (work/history cancellation-runtime cancellation-reference))
+
+(def double-failure-runtime (work/durable-runtime))
+(def double-failure-work
+  (work/ensure
+   {:id :double-failure-scope
+    :version 1}
+   (work/step :double-failure-body
+     (fn [input context]
+       (throw (ex-info "body failure" {}))))
+   (work/step :double-failure-cleanup
+     (fn [outcome context]
+       (throw (ex-info "cleanup failure" {}))))))
+(def double-failure-reference
+  (work/start double-failure-runtime
+              double-failure-work
+              nil
+              {:id "double-failure"}))
+
+(def results
+  [(test/check
+    "ensure returns body and cleanup outcomes after success"
+    [(:op (work/work-spec success-work))
+     (get-in success-result [:work/body :result])
+     (get-in success-result [:work/cleanup :result])
+     (deref success-cleanups)
+     (event-count success-history :example/body)
+     (event-count success-history :work/cleanup-completed)
+     (count (work/checkpoints success-runtime success-reference))]
+    [:ensure
+     5
+     {:cleanup? true
+      :body/status :completed
+      :body/result 5}
+     1
+     1
+     1
+     2])
+
+   (test/check
+    "cleanup runs after body failure and remains checkpointed"
+    [(work/status failure-runtime failure-reference)
+     (deref failed-cleanups)
+     (count (work/checkpoints failure-runtime failure-reference))
+     (event-count (work/history failure-runtime failure-reference)
+                  :work/cleanup-completed)]
+    [:failed 1 1 1])
+
+   (test/check
+    "cleanup runs after cancellation and cancellation remains terminal"
+    [(work/status cancellation-runtime cancellation-reference)
+     (deref cancelled-cleanups)
+     (count (work/checkpoints cancellation-runtime cancellation-reference))
+     (event-count cancellation-history :work/run-cancel-requested)
+     (event-count cancellation-history :work/run-cancelled)
+     (event-count cancellation-history :work/run-completed)]
+    [:cancelled 1 2 1 1 0])
+
+   (test/check
+    "body and cleanup errors remain visible together"
+    [(work/status double-failure-runtime double-failure-reference)
+     (not (nil? (work/error double-failure-runtime double-failure-reference)))
+     (event-count (work/history double-failure-runtime double-failure-reference)
+                  :work/cleanup-failed)]
+    [:failed true 1])])
+
+(test/print-results results)
