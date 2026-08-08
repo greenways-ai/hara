@@ -851,19 +851,13 @@ mod tests {
         assert_eq!(initial.status, MachineObservationStatus::Ready);
         assert_eq!(initial.program.entry, 0);
 
-        let mut saw_multiply = false;
+        // The production compiler folds the nested multiplication.
+        // Observation must report only instructions the VM actually executes.
         let mut saw_add = false;
         let mut final_after = None;
         for _ in 0..64 {
             let step = machine.step_observed();
             if let Some(instruction) = &step.instruction {
-                if instruction.opcode == "primitive"
-                    && instruction
-                        .operands
-                        .contains(&InstructionOperand::Text("*".into()))
-                {
-                    saw_multiply = true;
-                }
                 if instruction.opcode == "primitive"
                     && instruction
                         .operands
@@ -883,7 +877,6 @@ mod tests {
                 ObservedStepOutcome::Failed(error) => panic!("unexpected failure: {error}"),
             }
         }
-        assert!(saw_multiply);
         assert!(saw_add);
         let after = final_after.expect("return snapshot");
         assert_eq!(after.status, MachineObservationStatus::Returned);
@@ -893,7 +886,9 @@ mod tests {
     #[test]
     fn static_calls_report_enter_and_return_boundaries() {
         let mut machine = machine("(do (defn f [x] (+ x 1)) (f 41))");
-        let (kinds, value) = run_observed(&mut machine);
+        let registry = crate::embedding_namespace_registry();
+        let (kinds, value) =
+            crate::core::with_namespace_registry(&registry, || run_observed(&mut machine));
         assert_eq!(value, Value::Number(42));
         assert!(kinds.contains(&ObservationEventKind::CallEnter));
         assert!(kinds.contains(&ObservationEventKind::CallReturn));
