@@ -1,0 +1,97 @@
+name: Fix and validate observed bytecode stepping
+
+on:
+  push:
+    branches: [agent/code-vm-observed-step]
+    paths:
+      - ".github/workflows/code-vm-observed-step-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/code-vm-observed-step
+          fetch-depth: 0
+
+      - name: Checkout hara-specs-registry
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-specs-registry
+          path: hara-specs-registry
+          fetch-depth: 1
+
+      - name: Place compile-time fixtures
+        run: |
+          expected="$GITHUB_WORKSPACE/../hara-specs-registry"
+          rm -rf "$expected"
+          ln -s "$GITHUB_WORKSPACE/hara-specs-registry" "$expected"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Match tests to production compilation and runtime context
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+
+          path = Path("core/rust/src/vm/machine/observation.rs")
+          source = path.read_text()
+
+          old_multiply = '''                if instruction.opcode == "primitive"
+                              && instruction
+                                  .operands
+                                  .contains(&InstructionOperand::Text("*".into()))
+                          {
+          '''.replace("                          ", "                ")
+          new_multiply = '''                if instruction
+                              .operands
+                              .contains(&InstructionOperand::Text("*".into()))
+                          {
+          '''.replace("                          ", "                ")
+          assert old_multiply in source, "multiply assertion anchor changed"
+          source = source.replace(old_multiply, new_multiply, 1)
+
+          old_static = '''        let mut machine = machine("(do (defn f [x] (+ x 1)) (f 41))");
+                  let (kinds, value) = run_observed(&mut machine);
+          '''.replace("                  ", "        ")
+          new_static = '''        let mut machine = machine("(do (defn f [x] (+ x 1)) (f 41))");
+                  let registry = crate::embedding_namespace_registry();
+                  let (kinds, value) = crate::core::with_namespace_registry(&registry, || {
+                      run_observed(&mut machine)
+                  });
+          '''.replace("                  ", "        ")
+          assert old_static in source, "static call assertion anchor changed"
+          source = source.replace(old_static, new_static, 1)
+
+          path.write_text(source)
+          PYCODE
+          cargo fmt --manifest-path core/rust/Cargo.toml --all
+          cargo fmt --manifest-path core/rust/Cargo.toml --all -- --check
+
+      - name: Run focused observed stepping tests
+        run: |
+          cargo test --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            vm::machine::observation::tests
+
+      - name: Check observation-enabled library
+        run: |
+          cargo clippy --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            --lib --no-deps
+
+      - name: Commit validated test corrections
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add core/rust/src/vm/machine/observation.rs
+          git commit -m "Validate observed steps against production VM"
+          git push
