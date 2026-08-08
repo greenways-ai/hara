@@ -1,6 +1,8 @@
+;; Deprecated task-shaped entry names retained for callers while code.test
+;; execution migrates to native std.work values.
 (ns code.test.task
   (:require [code.test :as test]
-            [std.lib.task :as task]))
+            [code.test.cli :as cli]))
 
 (def run test/run)
 (def run:current test/run)
@@ -29,7 +31,7 @@
      options)))
 (defn process-test-args
   [arguments]
-  (task/process-ns-args (task/collapse-only arguments)))
+  (cli/process-args (cli/collapse-only arguments)))
 (defn -main
   [& arguments]
   (test/run (process-test-args arguments)))
