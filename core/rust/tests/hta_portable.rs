@@ -28,7 +28,7 @@ fn portable_codec_matches_the_runtime_codec_byte_for_byte() {
     let runtime = runtime_record([
         (
             "a",
-            Value::Vector(vec![Value::Boolean(true), Value::Nil].into()),
+            Value::Vector(vec![Value::Bool(true), Value::Nil].into()),
         ),
         ("b", Value::Number(2)),
         ("bytes", Value::Bytes(vec![0, 1, 255].into())),
