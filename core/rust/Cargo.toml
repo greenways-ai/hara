@@ -28,6 +28,8 @@ hir-encoder = ["halc-encoder"]
 # Experimental staged bytecode VM (notes/rust-bytecode-vm.md). Non-default:
 # all VM entry points are gated behind this feature.
 bytecode-vm = []
+# Opt-in bounded snapshots and one-boundary stepping for Hodos/code.vm.
+bytecode-observation = ["bytecode-vm"]
 tracing-jit = ["bytecode-vm"]
 native-jit = ["tracing-jit"]
 whole-wasm = ["bytecode-vm", "dep:wasm-encoder"]
