@@ -286,13 +286,18 @@
 
 (defn- event-stage-rule
   [event]
-  (case (:event/kind event)
-    :evaluation/start [:evaluate :evaluation/start]
-    :macro/expand [:expand :macro/expand]
-    :operation/enter [:call :operation/enter]
-    :operation/return [:return :operation/return]
-    :evaluation/error [:error :evaluation/error]
-    :journal/truncated [:trace :journal/truncated]))
+  (let [kind (:event/kind event)]
+    (cond
+      (= kind :evaluation/start) [:evaluate :evaluation/start]
+      (= kind :macro/expand) [:expand :macro/expand]
+      (= kind :operation/enter) [:call :operation/enter]
+      (= kind :operation/return) [:return :operation/return]
+      (= kind :evaluation/error) [:error :evaluation/error]
+      (= kind :journal/truncated) [:trace :journal/truncated]
+      :else
+      (invalid
+       "Unsupported code.vm.interpreter event kind"
+       {:event event}))))
 
 (defn- retain-operation-source
   [state event form]
@@ -323,17 +328,17 @@
                     :event/kind kind
                     :event/current event
                     :source/current form)]
-    (case kind
-      :evaluation/start
+    (cond
+      (= kind :evaluation/start)
       (assoc base
              :result nil
              :error nil)
 
-      :macro/expand
+      (= kind :macro/expand)
       (assoc base
              :macro/current event)
 
-      :operation/enter
+      (= kind :operation/enter)
       (assoc
        (assoc
         (assoc base
@@ -343,7 +348,7 @@
        :operation/sources
        (retain-operation-source state event form))
 
-      :operation/return
+      (= kind :operation/return)
       (assoc
        (assoc base
               :operation/current event)
@@ -352,14 +357,19 @@
         (:operation/stack state)
         (:operation/id event)))
 
-      :evaluation/error
+      (= kind :evaluation/error)
       (assoc base
              :error (:error/message event))
 
-      :journal/truncated
+      (= kind :journal/truncated)
       (assoc base
              :truncated true
-             :truncation/reason (:truncation/reason event)))))
+             :truncation/reason (:truncation/reason event))
+
+      :else
+      (invalid
+       "Unsupported code.vm.interpreter event kind"
+       {:event event}))))
 
 (defn- event-transition
   [machine journal event]

@@ -103,10 +103,11 @@
 
 (defn default-id
   [kind]
-  (case kind
-    :interpreter "vm/interpreter"
-    :halc "vm/halc"
-    :bytecode "vm/bytecode"))
+  (cond
+    (= kind :interpreter) "vm/interpreter"
+    (= kind :halc) "vm/halc"
+    (= kind :bytecode) "vm/bytecode"
+    :else nil))
 
 (defn machine?
   [value]
