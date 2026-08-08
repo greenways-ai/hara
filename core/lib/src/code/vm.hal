@@ -1,5 +1,6 @@
 (ns code.vm
-  (:require [code.vm.model :as model]))
+  (:require [code.vm.model :as model]
+            [code.vm.interpreter :as interpreter]))
 
 (def kinds model/+vm-kinds+)
 (def statuses model/+vm-statuses+)
@@ -15,3 +16,11 @@
 (def snapshot model/snapshot)
 (def trace model/trace)
 (def terminal? model/terminal?)
+
+(def interpreter-journal-schema interpreter/+journal-schema+)
+(def interpreter-journal? interpreter/journal?)
+(def interpreter-machine? interpreter/interpreter-machine?)
+(def interpreter-create interpreter/create)
+(def interpreter-step interpreter/step)
+(def interpreter-run interpreter/run)
+(def interpreter-from-journal interpreter/from-journal)
