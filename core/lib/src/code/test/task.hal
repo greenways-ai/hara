@@ -29,9 +29,21 @@
    (if (= options :help)
      #{:help :current :default :disable :all}
      options)))
+
+(defn legacy-test-options
+  "Preserves the archived task CLI result shape while code.test.cli owns the
+   canonical :namespace execution option."
+  [options]
+  (if (has? options :namespace)
+    (assoc (dissoc options :namespace)
+           :ns
+           (:namespace options))
+    options))
+
 (defn process-test-args
   [arguments]
-  (cli/process-args (cli/collapse-only arguments)))
+  (legacy-test-options
+   (cli/process-args (cli/collapse-only arguments))))
 (defn -main
   [& arguments]
   (test/run (process-test-args arguments)))
