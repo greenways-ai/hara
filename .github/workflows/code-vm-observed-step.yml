@@ -1,0 +1,165 @@
+name: Materialize observed bytecode stepping
+
+on:
+  push:
+    branches: [agent/code-vm-observed-step]
+    paths:
+      - ".github/workflows/code-vm-observed-step.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/code-vm-observed-step
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Add opt-in observed stepping
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import base64
+          import gzip
+
+          observation = gzip.decompress(base64.b64decode("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"))
+          observation_path = Path("core/rust/src/vm/machine/observation.rs")
+          observation_path.parent.mkdir(parents=True, exist_ok=True)
+          observation_path.write_bytes(observation)
+
+          machine_path = Path("core/rust/src/vm/machine.rs")
+          machine = machine_path.read_text()
+
+          module_anchor = '''#[path = "machine/globals.rs"]
+          mod globals;
+          '''.replace("          ", "")
+          module_replacement = '''#[path = "machine/globals.rs"]
+          mod globals;
+
+          #[cfg(feature = "bytecode-observation")]
+          #[path = "machine/observation.rs"]
+          mod observation;
+          #[cfg(feature = "bytecode-observation")]
+          pub use observation::{
+              CallFrameSnapshot, HandlerSnapshot, InstructionOperand, InstructionSnapshot,
+              MachineObservationStatus, MachineSnapshot, ObservationEventKind,
+              ObservationEventStatus, ObservationLimits, ObservedStep, ObservedStepOutcome,
+              ProgramSnapshot, SourcePositionSnapshot, ValueSnapshot, BYTECODE_TRACE_SCHEMA,
+          };
+          '''.replace("          ", "")
+          assert module_anchor in machine, "machine module anchor changed"
+          machine = machine.replace(module_anchor, module_replacement, 1)
+
+          dispatch_anchor = '''enum Dispatch {
+              Next(usize),
+          '''.replace("          ", "")
+          dispatch_replacement = '''enum Dispatch {
+              Next(usize),
+              Unwound(usize),
+          '''.replace("          ", "")
+          assert dispatch_anchor in machine, "Dispatch anchor changed"
+          machine = machine.replace(dispatch_anchor, dispatch_replacement, 1)
+
+          raised = "Ok(target) => return Dispatch::Next(target),"
+          raised_count = machine.count(raised)
+          assert raised_count >= 10, f"expected dispatch unwind sites, found {raised_count}"
+          machine = machine.replace(raised, "Ok(target) => return Dispatch::Unwound(target),")
+
+          call_anchor = '''                Dispatch::Call { callee, args } => {
+          '''.replace("          ", "")
+          unwind_arm = '''                Dispatch::Unwound(ip) => {
+                      #[cfg(feature = "tracing-jit")]
+                      {
+                          self.jit_path.clear();
+                          self.jit_loop_entries.clear();
+                      }
+                      self.ip = ip;
+                  }
+                  Dispatch::Call { callee, args } => {
+          '''.replace("          ", "")
+          assert call_anchor in machine, "run-loop call arm changed"
+          machine = machine.replace(call_anchor, unwind_arm, 1)
+          machine_path.write_text(machine)
+
+          frame_path = Path("core/rust/src/vm/frame.rs")
+          frame = frame_path.read_text()
+          frame_anchor = '''    /// Operand-stack base at which this frame was entered.
+              pub(crate) fn base(&self) -> usize {
+          '''.replace("              ", "    ")
+          frame_replacement = '''    /// Borrowed local slots for bounded machine observations.
+              pub(crate) fn locals(&self) -> &[VmSlot] {
+                  &self.locals
+              }
+
+              /// Operand-stack base at which this frame was entered.
+              pub(crate) fn base(&self) -> usize {
+          '''.replace("              ", "    ")
+          assert frame_anchor in frame, "frame base anchor changed"
+          frame_path.write_text(frame.replace(frame_anchor, frame_replacement, 1))
+
+          cargo_path = Path("core/rust/Cargo.toml")
+          cargo = cargo_path.read_text()
+          cargo_anchor = '''bytecode-vm = []
+          tracing-jit = ["bytecode-vm"]
+          '''.replace("          ", "")
+          cargo_replacement = '''bytecode-vm = []
+          # Opt-in bounded snapshots and one-boundary stepping for Hodos/code.vm.
+          bytecode-observation = ["bytecode-vm"]
+          tracing-jit = ["bytecode-vm"]
+          '''.replace("          ", "")
+          assert cargo_anchor in cargo, "Cargo feature anchor changed"
+          cargo_path.write_text(cargo.replace(cargo_anchor, cargo_replacement, 1))
+
+          vm_path = Path("core/rust/src/vm.rs")
+          vm = vm_path.read_text()
+          vm_anchor = '''pub use machine::{execute_program, execute_program_with_globals, Machine, VmOutcome};
+          pub use opcode::Instruction;
+          '''.replace("          ", "")
+          vm_replacement = '''pub use machine::{execute_program, execute_program_with_globals, Machine, VmOutcome};
+          #[cfg(feature = "bytecode-observation")]
+          pub use machine::{
+              CallFrameSnapshot, HandlerSnapshot, InstructionOperand, InstructionSnapshot,
+              MachineObservationStatus, MachineSnapshot, ObservationEventKind,
+              ObservationEventStatus, ObservationLimits, ObservedStep, ObservedStepOutcome,
+              ProgramSnapshot, SourcePositionSnapshot, ValueSnapshot, BYTECODE_TRACE_SCHEMA,
+          };
+          pub use opcode::Instruction;
+          '''.replace("          ", "")
+          assert vm_anchor in vm, "vm re-export anchor changed"
+          vm_path.write_text(vm.replace(vm_anchor, vm_replacement, 1))
+          PYCODE
+
+          cargo fmt --manifest-path core/rust/Cargo.toml --all
+
+      - name: Run observed stepping tests
+        run: |
+          cargo test --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            vm::machine::observation::tests
+
+      - name: Reject observation warnings
+        run: |
+          cargo clippy --manifest-path core/rust/Cargo.toml \
+            --features bytecode-observation \
+            --lib -- -D warnings
+
+      - name: Commit materialized implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add core/rust/Cargo.toml \
+                  core/rust/src/vm.rs \
+                  core/rust/src/vm/frame.rs \
+                  core/rust/src/vm/machine.rs \
+                  core/rust/src/vm/machine/observation.rs
+          git commit -m "Expose observed bytecode machine steps"
+          git push
