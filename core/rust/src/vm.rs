@@ -35,6 +35,9 @@ pub mod opcode;
 pub mod prepared;
 #[path = "vm/program.rs"]
 pub mod program;
+#[cfg(feature = "bytecode-observation")]
+#[path = "vm/session.rs"]
+pub mod session;
 #[path = "vm/slot.rs"]
 mod slot;
 #[path = "vm/source_map.rs"]
@@ -128,6 +131,11 @@ pub use machine::{execute_program, execute_program_with_globals, Machine, VmOutc
 pub use opcode::Instruction;
 pub use prepared::{prepare_call, PreparedCall};
 pub use program::{FunctionId, FunctionPrototype, Program};
+#[cfg(feature = "bytecode-observation")]
+pub use session::{
+    BytecodeObservationSession, BytecodeSessionError, BytecodeSessionStatus,
+    SessionRetentionLimits,
+};
 pub use validate::validate;
 
 /// Compiles, validates, and executes a closed source string in one step.
